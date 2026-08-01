@@ -1,0 +1,64 @@
+name: CI
+
+# Fails loudly if the production build breaks, so it isn't discovered by a
+# human trying to deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Typecheck, lint, build
+    runs-on: ubuntu-latest
+
+    env:
+      # CI uses a throwaway SQLite file — the build only needs the schema to
+      # generate the Prisma client, not a real database.
+      DATABASE_URL: "file:./ci.db"
+      # next build evaluates modules that read these. They are never used to
+      # reach Firebase in CI; no network call is made at build time.
+      NEXT_PUBLIC_FIREBASE_API_KEY: "ci-placeholder"
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "ci.firebaseapp.com"
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "ci-placeholder"
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "ci.appspot.com"
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+      NEXT_PUBLIC_FIREBASE_APP_ID: "1:000000000000:web:ci"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Seed and verify the data layer runs
+        # Catches repository/mapper breakage that typechecking cannot: the seed
+        # exercises every table through real writes.
+        run: pnpm db:seed
