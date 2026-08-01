@@ -18,10 +18,16 @@ component → `requireUser()` → `repo.*` → render. Mutations go through Serv
 Actions like `(auth)/onboarding/actions.ts`, or Route Handlers where a client
 component needs to call them.
 
-**Two blockers a human must clear** (see §8 at the bottom):
-1. `git push` is denied — the local credential lacks write access to the repo.
-   Two commits are sitting unpushed.
-2. Firebase credentials are not set, so no one can actually sign in yet.
+**Reviews:** `architecture-reviewer`, `security-reviewer`, `code-reviewer` and
+`risk-classifier` have all run and their confirmed findings are fixed (§8.3).
+
+**Blockers a human must clear:**
+1. **Firebase credentials are not set**, so nobody can sign in yet (§8.2).
+2. **§9 lists what must not be auto-approved** — including one open
+   product/legal question about `exportAll` returning third-party data.
+
+**Before Phase 3 grows more call sites:** split the optional joined-field types
+(`Requirement.quoteCount`, `Conversation.counterpart`) — see §8.3.
 
 This file is the source of truth for the migration. Not the original prompt, not
 anyone's memory. Update the status column as work lands. A fresh session should be
