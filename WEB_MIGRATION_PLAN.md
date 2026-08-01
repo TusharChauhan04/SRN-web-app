@@ -219,11 +219,13 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
-| App shell + sidebar nav | 5 `*Navigator.tsx` | `(app)/layout.tsx` | users | none | Not Started | Role-filtered items §3 |
-| Role gating middleware | `AppNavigator.tsx:88-118` | `middleware.ts` | users | AUTH | Not Started | Server-side, not client-only |
-| Login | `auth/LoginScreen.tsx` | `/login` | users | AUTH | Not Started | Google popup |
-| Onboarding (role select) | `auth/OnboardingScreen.tsx` | `/onboarding` | users | AUTH | Not Started | Creates profile |
-| Splash / loading | `auth/SplashScreen.tsx` | — | — | none | Not Started | Root loading state, no route |
+| App shell + sidebar nav | 5 `*Navigator.tsx` | `(app)/layout.tsx` | users | none | **Ported** | Sidebar + mobile drawer, role-filtered per `lib/nav/config.ts` |
+| Role gating | `AppNavigator.tsx:88-118` | `middleware.ts` + layouts | users | AUTH | **Ported** | Middleware is a redirect optimisation only (Edge can't verify); layouts + `requireRole` are the real gate |
+| UI primitives | `components/ui.tsx` | — | — | none | **Ported** | Button/Card/Field/Badge/Avatar/EmptyState/Stat + INR + date formatting |
+| Login | `auth/LoginScreen.tsx` | `/login` | users | AUTH | **Ported** | Google popup + email/password. Needs `security-reviewer` |
+| Onboarding (role select) | `auth/OnboardingScreen.tsx` | `/onboarding` | users | AUTH | **Ported** | Server Action; admin deliberately not self-selectable; applies referral code |
+| Splash / loading | `auth/SplashScreen.tsx` | — | — | none | **Done** | No web equivalent needed — server knows the session before first paint. Decision recorded |
+| Role-branched dashboard | 4 `dashboards/*.tsx` | `/dashboard` | requirements, quotes, bookings, messages, analytics | none | **Ported** | Seeker vs provider variants on one route; admin redirects to `/admin` |
 
 ### Phase 3 — Customer & business flows
 

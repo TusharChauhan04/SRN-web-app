@@ -15,6 +15,7 @@ import {
   type App,
 } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
+import { SESSION_COOKIE_MAX_AGE_MS } from "@/lib/auth/cookie";
 
 const ADMIN_APP_NAME = "srn-admin";
 
@@ -51,9 +52,13 @@ export function adminAuth(): Auth {
   return getAuth(getAdminApp());
 }
 
-/** Session cookie lifetime. Firebase caps this at 14 days. */
-export const SESSION_COOKIE_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
-export const SESSION_COOKIE_NAME = "srn_session";
+// Re-exported for convenience; the canonical definitions live in
+// lib/auth/cookie.ts so the Edge middleware can read them without importing
+// firebase-admin.
+export {
+  SESSION_COOKIE_MAX_AGE_MS,
+  SESSION_COOKIE_NAME,
+} from "@/lib/auth/cookie";
 
 /** Exchanges a freshly-minted ID token for a long-lived session cookie. */
 export async function createSessionCookie(idToken: string): Promise<string> {
