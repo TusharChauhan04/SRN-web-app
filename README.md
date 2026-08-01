@@ -25,10 +25,10 @@ truth for what is done, what is left, and why things were decided.
 |---|---|
 | Framework | Next.js 16 (App Router), React 19, TypeScript |
 | Styling | Tailwind CSS 4, design tokens ported from the mobile app |
-| Auth | Firebase Auth (identity only) + httpOnly session cookies |
-| Data | Repository interfaces → Prisma 6 → SQLite *(placeholder)* |
-| Backend | Next.js Route Handlers + Server Actions (single deployable unit) |
-| Payments | Razorpay hosted Checkout *(not yet built — Phase 4)* |
+| Auth | Pluggable provider — Firebase Auth in production, working mock locally |
+| Data | Gateway → services → repository interfaces → Prisma 6 → SQLite *(placeholder)* |
+| Backend | API gateway over Next.js Route Handlers (single deployable unit) |
+| Payments | Pluggable provider — Razorpay in production, working mock locally |
 | Package manager | pnpm 9 |
 
 ---
@@ -94,8 +94,17 @@ pnpm dev
 
 http://localhost:3000 — you'll be redirected to `/login`.
 
-Check http://localhost:3000/api/healthz to confirm the database is reachable and
-Firebase Admin is configured.
+**Signing in during development:** the mock auth provider accepts any email and
+checks no password, so use one of the seeded addresses (`arjun@dev.test`,
+`meera@example.test`, `admin@srn.test`) or any address you like. The login screen
+says so plainly, so nobody mistakes it for real authentication.
+
+Note the seeded rows use `seed-*` ids, so signing in as `arjun@dev.test` creates
+a *separate* profile and sends you to onboarding. To land in a seeded account,
+change that row's `id` to the uid shown in the health check, or just onboard a
+fresh one — the seed exists to make screens non-empty, not to be logged into.
+
+Check http://localhost:3000/api/healthz for database and provider status.
 
 ---
 
