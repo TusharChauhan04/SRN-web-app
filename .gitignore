@@ -54,3 +54,4 @@ prisma/dev.db*
 
 # review agent scratch output
 .claude/review-logs/
+.claude/agent-memory/
