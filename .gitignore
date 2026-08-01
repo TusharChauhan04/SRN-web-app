@@ -51,3 +51,6 @@ prisma/dev.db*
 
 # local file uploads (StorageProvider "local" development mode)
 /public/uploads
+
+# review agent scratch output
+.claude/review-logs/
