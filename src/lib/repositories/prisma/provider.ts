@@ -291,6 +291,20 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
     return row ? toSubscription(row) : null;
   }
 
+  async findByPaymentId(paymentId: string): Promise<Subscription | null> {
+    const row = await prisma.subscription.findFirst({
+      where: { razorpayPaymentId: paymentId },
+    });
+    return row ? toSubscription(row) : null;
+  }
+
+  async findByOrderId(orderId: string): Promise<Subscription | null> {
+    const row = await prisma.subscription.findFirst({
+      where: { razorpayOrderId: orderId },
+    });
+    return row ? toSubscription(row) : null;
+  }
+
   async createOrder(
     userId: string,
     tier: SubscriptionTier,

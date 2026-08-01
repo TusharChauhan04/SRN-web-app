@@ -21,6 +21,7 @@ import * as dashboard from "./operations/dashboard";
 import * as req from "./operations/requirements";
 import * as book from "./operations/bookings";
 import * as acct from "./operations/account";
+import * as prov from "./operations/provider";
 
 /** Extracts an operation's validated input type, so call sites stay honest. */
 type In<T> = T extends { input: { parse: (v: unknown) => infer R } } ? R : never;
@@ -138,6 +139,50 @@ export const gateway = {
   referrals: {
     mine: () => invoke(acct.myReferral, undefined),
   },
+
+  portfolio: {
+    listMine: () => invoke(prov.listPortfolio, undefined),
+    add: (input: In<typeof prov.addPortfolioItem>) =>
+      invoke(prov.addPortfolioItem, input),
+    update: (input: In<typeof prov.updatePortfolioItem>) =>
+      invoke(prov.updatePortfolioItem, input),
+    setFeatured: (input: In<typeof prov.setPortfolioFeatured>) =>
+      invoke(prov.setPortfolioFeatured, input),
+    delete: (input: In<typeof prov.deletePortfolioItem>) =>
+      invoke(prov.deletePortfolioItem, input),
+  },
+
+  availability: {
+    mine: () => invoke(prov.getAvailability, undefined),
+    setHours: (input: In<typeof prov.setWorkingHours>) =>
+      invoke(prov.setWorkingHours, input),
+    block: (input: In<typeof prov.blockDate>) => invoke(prov.blockDate, input),
+    unblock: (input: In<typeof prov.unblockDate>) =>
+      invoke(prov.unblockDate, input),
+  },
+
+  earnings: {
+    mine: () => invoke(prov.earnings, undefined),
+  },
+
+  analytics: {
+    mine: (input: In<typeof prov.analytics> = {}) =>
+      invoke(prov.analytics, input),
+  },
+
+  uploads: {
+    prepare: (input: In<typeof prov.prepareUpload>) =>
+      invoke(prov.prepareUpload, input),
+    confirm: (input: In<typeof prov.confirmUpload>) =>
+      invoke(prov.confirmUpload, input),
+  },
+
+  subscriptions: {
+    view: () => invoke(prov.subscriptionView, undefined),
+    checkout: (input: In<typeof prov.createCheckout>) =>
+      invoke(prov.createCheckout, input),
+    cancel: () => invoke(prov.cancelSubscription, undefined),
+  },
 } as const;
 
 /**
@@ -152,6 +197,7 @@ export function loadOperations(): void {
   void req;
   void book;
   void acct;
+  void prov;
 }
 
 export { getOperation, invoke, registeredOperationNames } from "./core";

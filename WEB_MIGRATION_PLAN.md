@@ -2,7 +2,7 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phases 0–3 done. Phase 4 (provider flows + payments) is next.
+**Status:** Phases 0–4 done. Phase 5 (admin panel) is next.
 **Last updated:** 2026-08-01
 
 ## Resume here
@@ -25,9 +25,15 @@ Auth and payments are pluggable providers with working local implementations,
 so the app runs with no third-party credentials. See README "Connecting real
 services".
 
-**Next step:** Phase 4 — provider flows (portfolio, availability, earnings,
-analytics) and wiring subscription checkout through the payment provider. Copy
-the pattern from any Phase 3 screen: page → `gateway.*` → service → repo.
+**Next step:** Phase 5 — the admin panel. Use `access: "admin"` on the gateway
+operations; that is the only gate needed, and it is checked server-side before
+the handler runs. Copy the pattern from any Phase 3/4 screen:
+page → `gateway.*` → service → repo.
+
+**File storage** now exists as a provider too (`src/lib/providers/storage/`),
+with a working local implementation. Firebase Storage is stubbed with a clear
+"not implemented" error rather than pretending — the interface is final, so
+connecting a real bucket is implementing three methods.
 
 **Reviews:** `architecture-reviewer`, `security-reviewer`, `code-reviewer` and
 `risk-classifier` have all run and their confirmed findings are fixed (§8.3).
@@ -288,15 +294,15 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
-| Digital dashboard | `dashboards/DigitalProviderDashboard.tsx` | `/dashboard` | quotes, bookings | none | Not Started | |
-| Local dashboard | `dashboards/LocalProviderDashboard.tsx` | `/dashboard` | bookings, leads | none | Not Started | |
+| Digital dashboard | `dashboards/DigitalProviderDashboard.tsx` | `/dashboard` | quotes, bookings | none | **Ported** | |
+| Local dashboard | `dashboards/LocalProviderDashboard.tsx` | `/dashboard` | bookings, leads | none | **Ported** | |
 | Submit bid/quote | `shared/BidSubmitScreen.tsx` | `/requirements/[id]/bid` | quotes | none | **Ported** | |
-| Portfolio | `digital/PortfolioScreen.tsx` | `/portfolio` | portfolio, uploads | **PII/INFRA** | Not Started | Arbitrary file upload — not `none`. Needs type/size limits and signed URLs |
-| Earnings | `digital/EarningsScreen.tsx` | `/earnings` | bookings, subscriptions | none | Not Started | |
-| Availability | `shared/AvailabilityScreen.tsx` | `/availability` | working_hours, blocked_dates | none | Not Started | date input |
-| Analytics | `shared/AnalyticsScreen.tsx` | `/analytics` | profile_views, bookings | none | Not Started | |
-| Subscription + Razorpay | `shared/SubscriptionScreen.tsx` | `/subscription` | subscriptions | PAYMENTS | Not Started | Checkout.js + webhook |
-| File storage abstraction | `lib/uploadService.ts` | `/api/uploads/*` | uploads | PII | Not Started | presign/PUT/confirm |
+| Portfolio | `digital/PortfolioScreen.tsx` | `/portfolio` | portfolio, uploads | **PII/INFRA** | **Ported** | Arbitrary file upload — not `none`. Needs type/size limits and signed URLs |
+| Earnings | `digital/EarningsScreen.tsx` | `/earnings` | bookings, subscriptions | none | **Ported** | |
+| Availability | `shared/AvailabilityScreen.tsx` | `/availability` | working_hours, blocked_dates | none | **Ported** | date input |
+| Analytics | `shared/AnalyticsScreen.tsx` | `/analytics` | profile_views, bookings | none | **Ported** | |
+| Subscription + Razorpay | `shared/SubscriptionScreen.tsx` | `/subscription` | subscriptions | PAYMENTS | **Ported** | Checkout.js + webhook |
+| File storage abstraction | `lib/uploadService.ts` | `/api/uploads/*` | uploads | PII | **Ported** | presign/PUT/confirm |
 
 ### Phase 5 — Admin panel
 
@@ -343,7 +349,7 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 | `.env.example` complete | Not Started | |
 | Secrets gitignored | Not Started | |
 | Health endpoint | Not Started | Phase 1 |
-| Security headers + rate limiting | Not Started | |
+| Security headers + rate limiting | **Done** | CSP landed with the payment page, not after it — Razorpay injects a script and an iframe |
 | Hosting target decision | Not Started | Vercel default; SQLite-on-serverless caveat — see `DATABASE.md` |
 | CI production build check | Not Started | |
 | README deploy instructions | Not Started | |

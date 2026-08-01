@@ -419,6 +419,23 @@ export interface AvailabilityRepository {
 
 export interface SubscriptionRepository {
   findByUserId(userId: string): Promise<Subscription | null>;
+  /**
+   * Replay guard for the payment webhook.
+   *
+   * Payment providers retry webhooks they believe failed, and Razorpay
+   * explicitly may deliver the same event more than once. Without this, a
+   * retry re-grants the tier and extends the period again.
+   */
+  findByPaymentId(paymentId: string): Promise<Subscription | null>;
+  /**
+   * Order-level replay guard.
+   *
+   * Distinct from `findByPaymentId`: a provider retry reuses the payment id,
+   * but a duplicate or resubmitted webhook can carry a NEW payment id for an
+   * order that was already settled. Guarding only on payment id lets the same
+   * order be granted twice.
+   */
+  findByOrderId(orderId: string): Promise<Subscription | null>;
   /** Records the pending Razorpay order before checkout opens. */
   createOrder(
     userId: string,
