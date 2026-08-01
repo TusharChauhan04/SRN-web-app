@@ -10,6 +10,7 @@
  * these interfaces and change the wiring in ./index.ts. Nothing else moves.
  * See DATABASE.md.
  */
+import type { Actor } from "./authorize";
 import type {
   AuditEvent,
   BlockedDate,
@@ -100,13 +101,19 @@ export interface UserRepository {
   searchProviders(filter: SearchProvidersFilter): Promise<Page<PublicUser>>;
 
   // Admin operations — /admin/users/:id/*
-  setSuspended(id: string, suspended: boolean): Promise<User>;
-  setRole(id: string, role: UserRole): Promise<User>;
-  delete(id: string): Promise<void>;
+  //
+  // These take an explicit `actor` and assert on it. That is defence in depth,
+  // NOT a replacement for gating the route with requireAdmin: it exists so that
+  // forgetting to gate is a compile error rather than a silent privilege
+  // escalation or PII dump. Pass SYSTEM_ACTOR for non-request callers.
+  setSuspended(id: string, suspended: boolean, actor: Actor): Promise<User>;
+  setRole(id: string, role: UserRole, actor: Actor): Promise<User>;
+  delete(id: string, actor: Actor): Promise<void>;
 
-  // GDPR — /gdpr/account
-  markForDeletion(id: string, at: Date): Promise<User>;
-  cancelDeletion(id: string): Promise<User>;
+  // GDPR — /gdpr/account. Self-or-admin: a user may erase or export their own
+  // data, an admin may act on their behalf, nobody may touch a stranger's.
+  markForDeletion(id: string, at: Date, actor: Actor): Promise<User>;
+  cancelDeletion(id: string, actor: Actor): Promise<User>;
   /**
    * Strips PII in place across the user row AND every related row that carries
    * identity (KYC docs, message text, dispute evidence, uploads), keeping the
@@ -116,17 +123,17 @@ export interface UserRepository {
    * objects from storage, and delete the Firebase Auth user separately. Neither
    * lives in this database.
    */
-  anonymize(id: string): Promise<void>;
+  anonymize(id: string, actor: Actor): Promise<void>;
   /** Storage keys to delete from object storage before `anonymize`. */
-  listStorageKeys(id: string): Promise<string[]>;
+  listStorageKeys(id: string, actor: Actor): Promise<string[]>;
   /** Every row belonging to this user, for the GDPR export bundle. */
-  exportAll(id: string): Promise<Record<string, unknown>>;
+  exportAll(id: string, actor: Actor): Promise<Record<string, unknown>>;
 
   // Aggregate counters used by dashboards
   countByRole(): Promise<Record<UserRole, number>>;
   countCreatedSince(since: Date): Promise<number>;
   /** Accounts sharing a signal (same IP/device) — /admin/fraud/accounts. */
-  findSuspiciousAccounts(limit?: number): Promise<User[]>;
+  findSuspiciousAccounts(actor: Actor, limit?: number): Promise<User[]>;
 }
 
 // ─────────────────────────── Requirements ───────────────────────────
@@ -547,7 +554,7 @@ export interface ModerationRepository {
   listReports(
     filter?: PageParams & { status?: string },
   ): Promise<Page<Report>>;
-  resolveReport(id: string): Promise<Report>;
+  resolveReport(id: string, actor: Actor): Promise<Report>;
 }
 
 // ─────────────────────────── Platform ───────────────────────────
@@ -568,7 +575,12 @@ export interface AuditRepository {
 export interface FeatureFlagRepository {
   list(): Promise<FeatureFlag[]>;
   get(key: string): Promise<FeatureFlag | null>;
-  set(key: string, enabled: boolean, description?: string): Promise<FeatureFlag>;
+  set(
+    key: string,
+    enabled: boolean,
+    actor: Actor,
+    description?: string,
+  ): Promise<FeatureFlag>;
 }
 
 export interface RateLimitRepository {

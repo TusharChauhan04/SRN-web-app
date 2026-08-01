@@ -30,7 +30,46 @@ const list = (...items: string[]) => `,${items.join(",")},`;
 /** Participant key, matching `conversationKey` in the mappers. */
 const convKeyFor = (a: string, b: string) => `,${[a, b].sort().join(",")},`;
 
+/**
+ * Refuses to run anywhere it could destroy real data.
+ *
+ * This script calls deleteMany() on all 24 tables against whatever
+ * DATABASE_URL resolves to, and CI invokes it as a build step. Previously
+ * nothing in the script enforced which database that was — CI was safe only
+ * because the workflow happened to set a local file URL inline. A deploy
+ * pipeline inheriting that step, or a human running `pnpm db:seed` with a
+ * production .env loaded, would have wiped the database with no warning.
+ */
+function assertSafeToWipe(): void {
+  const url = process.env.DATABASE_URL ?? "";
+  const override = process.env.SEED_ALLOW_DESTRUCTIVE === "1";
+
+  if (override) {
+    console.warn(
+      "⚠  SEED_ALLOW_DESTRUCTIVE=1 — wiping a non-local database on purpose.",
+    );
+    return;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Refusing to seed: NODE_ENV=production. This script deletes every row in every table.\n" +
+        "If you genuinely mean to wipe this database, re-run with SEED_ALLOW_DESTRUCTIVE=1.",
+    );
+  }
+
+  if (!url.startsWith("file:")) {
+    throw new Error(
+      `Refusing to seed: DATABASE_URL is not a local SQLite file (${url.split("://")[0] || "unset"}...).\n` +
+        "This script deletes every row in every table. If you genuinely mean to\n" +
+        "wipe this database, re-run with SEED_ALLOW_DESTRUCTIVE=1.",
+    );
+  }
+}
+
 async function main() {
+  assertSafeToWipe();
+
   console.log("Clearing existing data…");
 
   // Order matters: children before parents, since SQLite enforces FKs.

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { assertAdmin, type Actor } from "../authorize";
 import type {
   CreateDisputeInput,
   CreateVerificationInput,
@@ -404,7 +405,8 @@ export class PrismaModerationRepository implements ModerationRepository {
     return { items: items.map(toReport), total, limit, offset };
   }
 
-  async resolveReport(id: string): Promise<Report> {
+  async resolveReport(id: string, actor: Actor): Promise<Report> {
+    assertAdmin(actor, "resolveReport");
     const row = await prisma.report.update({
       where: { id },
       data: { status: "resolved", resolvedAt: new Date() },

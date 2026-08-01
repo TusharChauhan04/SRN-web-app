@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { assertAdmin, assertSelfOrAdmin, type Actor } from "../authorize";
 import type {
   CreateUserInput,
   ListUsersFilter,
@@ -190,7 +191,12 @@ export class PrismaUserRepository implements UserRepository {
     return { items: items.map(toPublicUser), total, limit, offset };
   }
 
-  async setSuspended(id: string, suspended: boolean): Promise<User> {
+  async setSuspended(
+    id: string,
+    suspended: boolean,
+    actor: Actor,
+  ): Promise<User> {
+    assertAdmin(actor, "setSuspended");
     const row = await prisma.user.update({
       where: { id },
       data: { isSuspended: suspended },
@@ -198,16 +204,21 @@ export class PrismaUserRepository implements UserRepository {
     return toUser(row);
   }
 
-  async setRole(id: string, role: UserRole): Promise<User> {
+  async setRole(id: string, role: UserRole, actor: Actor): Promise<User> {
+    // Privilege escalation path — admin only, never self-service.
+    assertAdmin(actor, "setRole");
     const row = await prisma.user.update({ where: { id }, data: { role } });
     return toUser(row);
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, actor: Actor): Promise<void> {
+    // Hard delete — admin only.
+    assertAdmin(actor, "delete user");
     await prisma.user.delete({ where: { id } });
   }
 
-  async markForDeletion(id: string, at: Date): Promise<User> {
+  async markForDeletion(id: string, at: Date, actor: Actor): Promise<User> {
+    assertSelfOrAdmin(actor, id, "markForDeletion");
     const row = await prisma.user.update({
       where: { id },
       data: { deletionRequestedAt: at },
@@ -215,7 +226,8 @@ export class PrismaUserRepository implements UserRepository {
     return toUser(row);
   }
 
-  async cancelDeletion(id: string): Promise<User> {
+  async cancelDeletion(id: string, actor: Actor): Promise<User> {
+    assertSelfOrAdmin(actor, id, "cancelDeletion");
     const row = await prisma.user.update({
       where: { id },
       data: { deletionRequestedAt: null },
@@ -223,7 +235,8 @@ export class PrismaUserRepository implements UserRepository {
     return toUser(row);
   }
 
-  async anonymize(id: string): Promise<void> {
+  async anonymize(id: string, actor: Actor): Promise<void> {
+    assertSelfOrAdmin(actor, id, "anonymize");
     // Keep the User row so bookings/reviews retain referential integrity, but
     // strip every field that identifies a person — AND every related row that
     // carries identity. Scrubbing only the User row left the KYC document URLs,
@@ -285,7 +298,8 @@ export class PrismaUserRepository implements UserRepository {
    * the Firebase Auth user is deleted — neither of which this repository can
    * do, because both live outside the database. The GDPR handler must do both.
    */
-  async listStorageKeys(id: string): Promise<string[]> {
+  async listStorageKeys(id: string, actor: Actor): Promise<string[]> {
+    assertSelfOrAdmin(actor, id, "listStorageKeys");
     const [uploads, verifications] = await Promise.all([
       prisma.upload.findMany({
         where: { userId: id },
@@ -303,7 +317,8 @@ export class PrismaUserRepository implements UserRepository {
     ].filter(Boolean);
   }
 
-  async exportAll(id: string): Promise<Record<string, unknown>> {
+  async exportAll(id: string, actor: Actor): Promise<Record<string, unknown>> {
+    assertSelfOrAdmin(actor, id, "exportAll");
     const [
       user,
       requirements,
@@ -416,7 +431,8 @@ export class PrismaUserRepository implements UserRepository {
     return prisma.user.count({ where: { createdAt: { gte: since } } });
   }
 
-  async findSuspiciousAccounts(limit = 50): Promise<User[]> {
+  async findSuspiciousAccounts(actor: Actor, limit = 50): Promise<User[]> {
+    assertAdmin(actor, "findSuspiciousAccounts");
     // Heuristic placeholder matching the mobile backend's intent: brand-new
     // accounts that already hold a suspiciously high review count. A real
     // implementation would join device/IP signals, which this schema does not

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { assertAdmin, type Actor } from "../authorize";
 import type {
   AuditRepository,
   CreateNotificationInput,
@@ -377,8 +378,11 @@ export class PrismaFeatureFlagRepository implements FeatureFlagRepository {
   async set(
     key: string,
     enabled: boolean,
+    actor: Actor,
     description?: string,
   ): Promise<FeatureFlag> {
+    // Flags change platform behaviour for everyone — admin only.
+    assertAdmin(actor, "featureFlags.set");
     const row = await prisma.featureFlag.upsert({
       where: { key },
       create: { key, enabled, description: description ?? null },

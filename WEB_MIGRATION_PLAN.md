@@ -274,7 +274,7 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 | Digital dashboard | `dashboards/DigitalProviderDashboard.tsx` | `/dashboard` | quotes, bookings | none | Not Started | |
 | Local dashboard | `dashboards/LocalProviderDashboard.tsx` | `/dashboard` | bookings, leads | none | Not Started | |
 | Submit bid/quote | `shared/BidSubmitScreen.tsx` | `/requirements/[id]/bid` | quotes | none | Not Started | |
-| Portfolio | `digital/PortfolioScreen.tsx` | `/portfolio` | portfolio, uploads | none | Not Started | file upload |
+| Portfolio | `digital/PortfolioScreen.tsx` | `/portfolio` | portfolio, uploads | **PII/INFRA** | Not Started | Arbitrary file upload — not `none`. Needs type/size limits and signed URLs |
 | Earnings | `digital/EarningsScreen.tsx` | `/earnings` | bookings, subscriptions | none | Not Started | |
 | Availability | `shared/AvailabilityScreen.tsx` | `/availability` | working_hours, blocked_dates | none | Not Started | date input |
 | Analytics | `shared/AnalyticsScreen.tsx` | `/analytics` | profile_views, bookings | none | Not Started | |
@@ -286,7 +286,7 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
 | Admin dashboard | `dashboards/AdminDashboard.tsx` | `/admin` | users, requirements, quotes, bookings, disputes | none | Not Started | |
-| Users management | `admin/UsersScreen.tsx` | `/admin/users` | users, audit_events | PII | Not Started | suspend/role/delete |
+| Users management | `admin/UsersScreen.tsx` | `/admin/users` | users, audit_events | **PII/AUTH/DATA_DELETION** | Not Started | `setRole` is privilege escalation and `delete` is a hard delete — not PII alone |
 | Delete user | `routes/admin.ts:307` | `/admin/users` | users | DATA_DELETION | Not Started | |
 | Disputes management | `admin/DisputesManagementScreen.tsx` | `/admin/disputes` | disputes | PII | Not Started | resolve |
 | Verification queue | `admin/VerificationQueueScreen.tsx` | `/admin/verification` | verification_requests | PII | Not Started | KYC approve/reject |
@@ -431,3 +431,60 @@ not forgotten):
 | `RateLimitRepository` is not really a repository, and its `hit()` is check-then-act (TOCTOU) on the auth path | Should move to `src/lib/ratelimit/` with its own provider interface |
 | No tests, no test runner | Blocks `test-generater` / `test-executor` from being useful |
 | `components/ui.tsx` is one file exporting ~12 components | Split to `components/ui/` before Phase 3 |
+
+
+---
+
+## 9. Requires human approval — do not auto-approve
+
+From the risk classification (all five categories are touched: AUTH, PAYMENTS,
+PII, DATA_DELETION, INFRA). These must be looked at by a person, not waved
+through by a review pass:
+
+1. **Any change to `ci.yml` that runs a destructive script.** `prisma/seed.ts`
+   wipes 24 tables. It now refuses to run unless `DATABASE_URL` is a local
+   `file:` URL and `NODE_ENV` is not production, with an explicit
+   `SEED_ALLOW_DESTRUCTIVE=1` override — but a workflow edit can still route it
+   at a real database.
+2. **The Razorpay webhook (Phase 4).** `activateFromPayment` grants the tier
+   and flips `isPremium` keyed on `razorpayOrderId` alone, with a
+   caller-supplied `periodEnd` and no replay guard on `razorpayPaymentId`. The
+   webhook must verify the Razorpay signature *before* calling it and reject
+   replays. The "only the verified webhook grants" invariant currently lives in
+   a comment, because the webhook does not exist yet.
+3. **The first `(admin)` route / first `requireAdmin` caller.** It sets the
+   template ten admin screens will copy.
+4. **The GDPR export/deletion UI (Phase 6).** Irreversible, and `exportAll`
+   currently returns third-party personal data — see below.
+5. **KYC document storage and serving (Phase 4).** These are identity
+   documents. They need short-lived signed URLs, not a public bucket. Note
+   `anonymize` depends on the caller draining `listStorageKeys` first; an
+   erasure that skips it leaves the scans in the bucket.
+
+### Open issue: `exportAll` returns other people's data
+
+Even correctly gated to self-service, the bundle includes the counterpart's
+authored message text, `reports` where the user is the *reported* party
+(reporter identity and their notes), `profileViews` with every `viewerId`, and
+blocks in both directions.
+
+Breadth was deliberate — a sender-only export was an incomplete DSAR answer —
+but a subject access request is not a licence to receive a *different* person's
+personal data. This needs a redaction pass before the `/settings/data` UI ships,
+and the call on what to redact is a product/legal one, not purely engineering.
+**Flagged for a human decision, not fixed.**
+
+### Deferred, with reasons
+
+- **Verification approve/reject and dispute resolve** take a reviewer id but do
+  not assert on it. They still rely on route gating. The privileged user and
+  feature-flag methods now take an explicit `Actor` and assert; these should
+  follow before Phase 5 builds UI on them.
+- **`setSuspended` does not revoke Firebase refresh tokens.** Suspension works
+  only because `getSession` re-reads the database. Any future path that verifies
+  the cookie without going through `getSession` would lose enforcement.
+- **`TRUSTED_PROXY_COUNT` defaults to 1** — correct for Vercel, wrong for any
+  other proxy depth. Coupled to the still-open hosting decision.
+- **CSP is deferred to Phase 8 "with Razorpay".** Right pairing, but it means
+  the payment page ships without CSP unless Phase 8 lands before Phase 4's
+  checkout. Sequence them accordingly.

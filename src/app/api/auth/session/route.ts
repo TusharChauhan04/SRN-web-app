@@ -88,11 +88,18 @@ export async function DELETE(req: Request) {
   if (limited) return limited;
 
   return handle(async () => {
-    const cookieValue = req.headers
+    const cookieEntry = req.headers
       .get("cookie")
       ?.split(";")
-      .find((c) => c.trim().startsWith(`${SESSION_COOKIE_NAME}=`))
-      ?.split("=")[1];
+      .find((c) => c.trim().startsWith(`${SESSION_COOKIE_NAME}=`));
+
+    // slice past the FIRST "=", not split on every one — a value containing
+    // "=" would otherwise be truncated, leaving uid null so nothing gets
+    // revoked while the endpoint still returns {ok:true}. Exactly the silent
+    // failure the rest of this handler exists to prevent.
+    const cookieValue = cookieEntry
+      ? cookieEntry.trim().slice(cookieEntry.trim().indexOf("=") + 1)
+      : undefined;
 
     if (cookieValue) {
       // Distinguish "cookie was already invalid" from "revocation failed".
