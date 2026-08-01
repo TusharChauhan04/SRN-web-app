@@ -1,16 +1,13 @@
 "use client";
 
 /**
- * Client-side auth context — the web counterpart of mobile's
- * src/contexts/AuthContext.tsx.
+ * Client-side auth state — the web counterpart of mobile's AuthContext.
  *
- * Differences from mobile, all deliberate:
- *  - AsyncStorage persistence is replaced by an httpOnly session cookie minted
- *    by /api/auth/session. The server trusts the cookie, not this state.
- *  - FCM token registration is omitted: web push is deferred
- *    (WEB_MIGRATION_PLAN.md §5). The data path still exists server-side.
- *  - The profile is passed in from the server layout rather than fetched on
- *    mount, so there is no authenticated-but-blank flash on first paint.
+ * Two boundaries are respected here:
+ *  - it never imports an auth SDK; it goes through `authClient()`, so whether
+ *    the provider is Firebase or the dev mock is invisible to the UI;
+ *  - it never touches application data; the session exchange goes over the
+ *    gateway's HTTP surface like any other client-side call.
  */
 import {
   createContext,
@@ -21,25 +18,18 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import {
-  GoogleAuthProvider,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-  signInWithPopup,
-  signOut as firebaseSignOut,
-  updateProfile,
-} from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { authClient, AuthProviderError } from "@/lib/providers/auth/client";
+import { callGateway, GatewayCallError } from "@/lib/gateway/client";
 import type { User } from "@/lib/repositories/types";
 
 interface AuthContextValue {
-  /** The onboarded profile, or null when signed out / not yet onboarded. */
   user: User | null;
   busy: boolean;
   error: string | null;
   /** Non-error feedback, e.g. "verification email sent". */
   notice: string | null;
+  /** Which provider is active — lets the UI explain dev-mode sign-in. */
+  providerName: string;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (
@@ -53,8 +43,14 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/** Maps Firebase's error codes to something a person can act on. */
 function friendlyError(err: unknown): string {
+  if (err instanceof AuthProviderError) {
+    // Cancellation is a choice, not a failure worth reporting.
+    if (err.code === "auth/cancelled") return "";
+    return err.message;
+  }
+  if (err instanceof GatewayCallError) return err.message;
+
   const code =
     typeof err === "object" && err && "code" in err
       ? String((err as { code: unknown }).code)
@@ -73,7 +69,7 @@ function friendlyError(err: unknown): string {
     case "auth/cancelled-popup-request":
       return "";
     case "auth/popup-blocked":
-      return "Your browser blocked the sign-in popup. Allow popups for this site and try again.";
+      return "Your browser blocked the sign-in popup. Allow popups and try again.";
     case "auth/too-many-requests":
       return "Too many attempts. Wait a minute and try again.";
     case "auth/network-request-failed":
@@ -93,62 +89,48 @@ export function AuthProvider({
   initialUser: User | null;
 }) {
   const router = useRouter();
-  // Read the prop directly rather than seeding state from it. `router.refresh()`
-  // re-renders the server layout with a fresh profile while this provider stays
-  // mounted, so a useState copy would serve the value from first paint forever.
+  // Read the prop directly. `router.refresh()` re-renders the server layout
+  // with a fresh profile while this provider stays mounted, so a useState copy
+  // would serve the value from first paint forever.
   const user = initialUser;
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  /**
-   * Exchanges the Firebase ID token for the server session cookie. Every
-   * sign-in path funnels through here — the cookie is what the server checks.
-   */
-  const establishSession = useCallback(async (idToken: string) => {
-    const res = await fetch("/api/auth/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken }),
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      throw new Error(body?.error ?? "Could not start a session.");
-    }
-    // Server components read the cookie, so a refresh is what reveals the
-    // signed-in UI. The destination is decided server-side by role.
-    router.replace("/");
-    router.refresh();
-  }, [router]);
-
-  const run = useCallback(
-    async (fn: () => Promise<void>) => {
-      setBusy(true);
-      setError(null);
-      try {
-        await fn();
-      } catch (err) {
-        const message = friendlyError(err);
-        // Empty message means the user cancelled — not worth surfacing.
-        if (message) setError(message);
-      } finally {
-        // Must reset on success too. Clearing it only in `catch` left the
-        // button permanently disabled on any path that doesn't navigate away.
-        setBusy(false);
-      }
+  /** Exchanges a provider credential for the server session cookie. */
+  const establishSession = useCallback(
+    async (credential: string) => {
+      await callGateway("auth.createSession", { credential });
+      // Server components read the cookie, so a refresh is what reveals the
+      // signed-in UI. Destination is decided server-side by role.
+      router.replace("/");
+      router.refresh();
     },
-    [],
+    [router],
   );
+
+  const run = useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+    } catch (err) {
+      const message = friendlyError(err);
+      if (message) setError(message);
+    } finally {
+      // Must reset on success too, or any path that doesn't navigate away
+      // leaves the button permanently disabled.
+      setBusy(false);
+    }
+  }, []);
 
   const signInWithGoogle = useCallback(
     () =>
       run(async () => {
-        const auth = getFirebaseAuth();
-        const provider = new GoogleAuthProvider();
-        const credential = await signInWithPopup(auth, provider);
-        await establishSession(await credential.user.getIdToken());
+        const { credential } = await authClient().signInWithGoogle();
+        await establishSession(credential);
       }),
     [run, establishSession],
   );
@@ -156,13 +138,11 @@ export function AuthProvider({
   const signInWithEmail = useCallback(
     (email: string, password: string) =>
       run(async () => {
-        const auth = getFirebaseAuth();
-        const credential = await signInWithEmailAndPassword(
-          auth,
+        const { credential } = await authClient().signInWithPassword(
           email,
           password,
         );
-        await establishSession(await credential.user.getIdToken());
+        await establishSession(credential);
       }),
     [run, establishSession],
   );
@@ -170,20 +150,7 @@ export function AuthProvider({
   const signUpWithEmail = useCallback(
     (email: string, password: string, name: string) =>
       run(async () => {
-        const auth = getFirebaseAuth();
-        const credential = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password,
-        );
-        // Carry the name through so onboarding can prefill it.
-        await updateProfile(credential.user, { displayName: name });
-
-        // The session endpoint rejects unverified password sign-ups, so send
-        // the verification mail and stop here rather than bouncing off a 403.
-        await sendEmailVerification(credential.user);
-        await firebaseSignOut(auth).catch(() => {});
-
+        await authClient().signUpWithPassword(email, password, name);
         setNotice(
           `We've sent a verification link to ${email}. Confirm it, then sign in.`,
         );
@@ -195,29 +162,16 @@ export function AuthProvider({
     setBusy(true);
     setError(null);
     try {
-      // Clear the server cookie first: if the page reloads mid-sign-out, the
-      // server must not still consider the session valid.
-      const res = await fetch("/api/auth/session", { method: "DELETE" });
-      if (!res.ok) {
-        // The server could not revoke the session. Say so rather than
-        // pretending — this is the action users take when they think their
-        // account is compromised.
-        throw new Error(
-          "We couldn't fully sign you out. Check your connection and try again.",
-        );
-      }
-
-      await firebaseSignOut(getFirebaseAuth()).catch(() => {
-        // Firebase may already consider us signed out; the server cookie is
-        // revoked, which is what actually matters.
-      });
+      // Clear the server session first: if the page reloads mid-sign-out, the
+      // server must not still consider it valid.
+      await callGateway("auth.destroySession", { cookieValue: null });
+      await authClient().signOut();
       router.replace("/login");
       router.refresh();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "We couldn't sign you out. Try again.",
+        friendlyError(err) ||
+          "We couldn't sign you out. Check your connection and try again.",
       );
     } finally {
       setBusy(false);
@@ -230,6 +184,7 @@ export function AuthProvider({
       busy,
       error,
       notice,
+      providerName: authClient().name,
       signInWithGoogle,
       signInWithEmail,
       signUpWithEmail,

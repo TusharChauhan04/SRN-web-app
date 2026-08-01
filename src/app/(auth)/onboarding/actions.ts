@@ -1,32 +1,17 @@
 "use server";
 
 /**
- * Profile creation — the web equivalent of mobile's OnboardingScreen calling
- * POST /api/users.
+ * Onboarding submission.
  *
- * A Server Action rather than a Route Handler: this is a form submission with
- * no other consumer, and it needs the session cookie anyway.
+ * A Server Action rather than a client fetch, because it is a form post with no
+ * other consumer — but it still goes through the gateway rather than touching
+ * repositories, so validation, rate limiting, access policy and the audit entry
+ * all apply exactly as they would over HTTP.
  */
 import { redirect } from "next/navigation";
-import { z } from "zod";
-import { getSession } from "@/lib/auth/session";
+import { gateway, GatewayError } from "@/lib/gateway";
 import { homeForRole } from "@/lib/nav/config";
-import { repo } from "@/lib/repositories";
-import { SELF_SELECTABLE_ROLES } from "@/lib/repositories/types";
-
-const schema = z.object({
-  // Allowlist from types.ts — admin is granted, never self-selected. Using the
-  // shared constant means a newly added privileged role is not self-assignable
-  // by default.
-  role: z.enum(SELF_SELECTABLE_ROLES),
-  name: z.string().trim().min(2, "Enter your name").max(80),
-  location: z.string().trim().max(120).optional(),
-  title: z.string().trim().max(120).optional(),
-  skills: z.string().trim().max(400).optional(),
-  companyName: z.string().trim().max(120).optional(),
-  industry: z.string().trim().max(120).optional(),
-  referralCode: z.string().trim().max(20).optional(),
-});
+import type { SelfSelectableRole } from "@/lib/repositories/types";
 
 export type OnboardingState = { error?: string };
 
@@ -34,52 +19,33 @@ export async function completeOnboarding(
   _prev: OnboardingState,
   formData: FormData,
 ): Promise<OnboardingState> {
-  const session = await getSession();
-  if (!session) return { error: "Your session expired. Sign in again." };
-  if (session.user) redirect(homeForRole(session.user.role));
+  const raw = Object.fromEntries(formData) as Record<string, string>;
 
-  const parsed = schema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Check your details." };
+  let destination: string;
+  try {
+    const user = await gateway.auth.completeOnboarding({
+      role: raw.role as SelfSelectableRole,
+      name: raw.name ?? "",
+      location: raw.location || undefined,
+      title: raw.title || undefined,
+      // Split here so the gateway schema can validate real array bounds rather
+      // than a comma-separated blob.
+      skills: raw.skills
+        ? raw.skills.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined,
+      companyName: raw.companyName || undefined,
+      industry: raw.industry || undefined,
+      referralCode: raw.referralCode || undefined,
+    });
+    destination = homeForRole(user.role);
+  } catch (err) {
+    if (err instanceof GatewayError) {
+      return { error: err.message };
+    }
+    throw err;
   }
 
-  const input = parsed.data;
-
-  // Guard the race where two submissions land before the first redirect.
-  const existing = await repo.users.findById(session.uid);
-  if (existing) redirect(homeForRole(existing.role));
-
-  if (!session.email) {
-    return { error: "Your account has no email address attached." };
-  }
-
-  const user = await repo.users.create({
-    id: session.uid,
-    email: session.email,
-    name: input.name,
-    // No cast needed: z.enum(SELF_SELECTABLE_ROLES) already narrows this to a
-    // role the user is permitted to self-assign.
-    role: input.role,
-    location: input.location || undefined,
-    title: input.title || undefined,
-    skills: input.skills
-      ? input.skills.split(",").map((s) => s.trim()).filter(Boolean)
-      : undefined,
-    companyName: input.companyName || undefined,
-    industry: input.industry || undefined,
-  });
-
-  // Referral credit is best-effort: a bad code must not block onboarding.
-  if (input.referralCode) {
-    await repo.referrals.applyCode(input.referralCode, user.id).catch(() => {});
-  }
-
-  await repo.audit.record({
-    actorId: user.id,
-    action: "user.onboarded",
-    target: user.id,
-    metadata: { role: user.role },
-  });
-
-  redirect(homeForRole(user.role));
+  // Outside the try: redirect() throws by design, and catching it here would
+  // turn a successful signup into an error message.
+  redirect(destination);
 }

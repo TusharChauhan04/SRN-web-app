@@ -1,91 +1,37 @@
 import "server-only";
 
 /**
- * Server-side session resolution and role gating.
+ * Session helpers for layouts and pages.
  *
- * The mobile app checked `profile.role === "admin"` on the client because the
- * Express API was the real gate. On web the Route Handlers ARE the API, so the
- * role check has to happen here, on the server, on every protected call. A
- * client-side check alone would be decorative.
+ * These are a thin read-only view over the gateway's request context. They
+ * exist so a layout can decide what to render without making a data call —
+ * they do NOT grant access to anything. Actual data still goes through the
+ * gateway, which applies its own access policy per operation.
  */
-import { cookies } from "next/headers";
-import { cache } from "react";
-import { SESSION_COOKIE_NAME, verifySessionCookie } from "@/lib/firebase/admin";
-import { repo } from "@/lib/repositories";
+import { getContext } from "@/lib/gateway/context";
 import type { User, UserRole } from "@/lib/repositories/types";
 
 export interface Session {
   uid: string;
   email: string | null;
-  /** Null when the account is authenticated but has not completed onboarding. */
+  /** Null when authenticated but onboarding is not finished. */
   user: User | null;
 }
 
-/**
- * Resolves the current session, or null when signed out.
- *
- * Wrapped in React `cache` so multiple calls within one request (layout, page,
- * and a handful of components) share a single verification round trip.
- */
-export const getSession = cache(async (): Promise<Session | null> => {
-  const cookieStore = await cookies();
-  const cookie = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!cookie) return null;
-
-  try {
-    const decoded = await verifySessionCookie(cookie);
-    const user = await repo.users.findById(decoded.uid);
-
-    // A suspended account is treated as signed out everywhere, so no screen has
-    // to remember to check the flag individually.
-    if (user?.isSuspended) return null;
-
-    return { uid: decoded.uid, email: decoded.email ?? null, user };
-  } catch {
-    // Expired, revoked, or malformed cookie — all mean "signed out".
-    return null;
-  }
-});
+/** The current session, or null when signed out. */
+export async function getSession(): Promise<Session | null> {
+  const ctx = await getContext();
+  if (!ctx.uid) return null;
+  return { uid: ctx.uid, email: ctx.email, user: ctx.user };
+}
 
 /** The onboarded user, or null if signed out / not yet onboarded. */
 export async function getCurrentUser(): Promise<User | null> {
-  const session = await getSession();
-  return session?.user ?? null;
+  return (await getContext()).user;
 }
 
-export class UnauthorizedError extends Error {
-  constructor(message = "Not signed in") {
-    super(message);
-    this.name = "UnauthorizedError";
-  }
-}
-
-export class ForbiddenError extends Error {
-  constructor(message = "Not allowed") {
-    super(message);
-    this.name = "ForbiddenError";
-  }
-}
-
-/** Throws unless a fully onboarded user is signed in. */
-export async function requireUser(): Promise<User> {
+/** True when the signed-in user holds one of `roles`. For rendering choices. */
+export async function hasRole(...roles: UserRole[]): Promise<boolean> {
   const user = await getCurrentUser();
-  if (!user) throw new UnauthorizedError();
-  return user;
-}
-
-/** Throws unless the signed-in user holds one of `roles`. */
-export async function requireRole(...roles: UserRole[]): Promise<User> {
-  const user = await requireUser();
-  if (!roles.includes(user.role)) {
-    throw new ForbiddenError(
-      `Requires role: ${roles.join(" or ")}; user is ${user.role}`,
-    );
-  }
-  return user;
-}
-
-/** Convenience wrapper for the admin-only surface. */
-export async function requireAdmin(): Promise<User> {
-  return requireRole("admin");
+  return user ? roles.includes(user.role) : false;
 }

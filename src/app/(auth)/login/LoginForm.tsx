@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { isFirebaseConfigured } from "@/lib/firebase/client";
+import { authClient } from "@/lib/providers/auth/client";
 import {
   Alert,
   Button,
@@ -37,19 +37,25 @@ export function LoginForm() {
     }
   };
 
-  if (!isFirebaseConfigured) {
+  const provider = authClient();
+
+  if (!provider.isConfigured) {
     return (
       <Card className="p-6">
-        <h1 className="text-xl font-semibold">Firebase isn&apos;t configured</h1>
+        <h1 className="text-xl font-semibold">Sign-in isn&apos;t configured</h1>
         <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-          Copy <code className="font-mono">.env.example</code> to{" "}
-          <code className="font-mono">.env.local</code> and fill in the{" "}
-          <code className="font-mono">NEXT_PUBLIC_FIREBASE_*</code> values, then
-          restart the dev server.
+          The <code className="font-mono">{provider.name}</code> auth provider is
+          selected but missing credentials. Either fill in the{" "}
+          <code className="font-mono">NEXT_PUBLIC_FIREBASE_*</code> values in{" "}
+          <code className="font-mono">.env.local</code>, or set{" "}
+          <code className="font-mono">AUTH_PROVIDER=mock</code> to run without
+          them.
         </p>
       </Card>
     );
   }
+
+  const isDevProvider = provider.name === "mock";
 
   return (
     <div className="space-y-6">
@@ -66,6 +72,16 @@ export function LoginForm() {
       </div>
 
       <Card className="p-6">
+        {isDevProvider ? (
+          <div className="mb-4">
+            <Alert tone="warning">
+              Development sign-in — any email works and no password is checked.
+              Set <code className="font-mono">AUTH_PROVIDER=firebase</code> with
+              credentials for real authentication.
+            </Alert>
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mb-4">
             <Alert>{error}</Alert>

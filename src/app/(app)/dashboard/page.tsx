@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireUser } from "@/lib/auth/session";
-import { repo } from "@/lib/repositories";
-import {
-  isProviderRole,
-  type Booking,
-  type User,
-} from "@/lib/repositories/types";
+import { gateway } from "@/lib/gateway";
+import { getCurrentUser } from "@/lib/auth/session";
+import type {
+  ProviderDashboard,
+  SeekerDashboard,
+} from "@/lib/services/dashboard.service";
+import type { Booking } from "@/lib/repositories/types";
 import {
   Avatar,
   Badge,
@@ -27,82 +27,60 @@ export const metadata = { title: "Dashboard — SRN" };
 /**
  * One route, four dashboards.
  *
- * Mobile has four separate dashboard screens (BusinessDashboard,
- * CustomerDashboard, DigitalProviderDashboard, LocalProviderDashboard) mounted
- * by four separate navigators. On web they share `/dashboard` and branch on
- * role, which keeps the nav config simple and means a role change doesn't
- * strand the user on a dead URL.
+ * Mobile has four separate dashboard screens mounted by four separate
+ * navigators. On web they share `/dashboard` and branch on the shape the
+ * gateway returns, so a role change never strands the user on a dead URL.
+ *
+ * Note this page contains no data access of its own — it renders what the
+ * gateway hands back. All aggregation lives in dashboard.service.
  */
 export default async function DashboardPage() {
-  const user = await requireUser();
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
 
   // Admin has its own section with a different information architecture.
   if (user.role === "admin") redirect("/admin");
 
-  return isProviderRole(user.role) ? (
-    <ProviderDashboard user={user} />
+  const data = await gateway.dashboard.get();
+  const firstName = user.name.split(" ")[0];
+
+  return data.kind === "seeker" ? (
+    <SeekerView data={data} firstName={firstName} isBusiness={user.role === "business"} />
   ) : (
-    <SeekerDashboard user={user} />
+    <ProviderView data={data} firstName={firstName} skills={user.skills} />
   );
 }
 
 // ─────────────── Business / customer (posts requirements) ───────────────
 
-async function SeekerDashboard({ user }: { user: User }) {
-  const [
-    requirements,
-    bookings,
-    quotes,
-    unreadMessages,
-    openRequirementsPage,
-    confirmedPage,
-    inProgressPage,
-  ] = await Promise.all([
-    repo.requirements.list({ creatorId: user.id, limit: 5 }),
-    repo.bookings.list({ customerId: user.id, limit: 5 }),
-    repo.quotes.list({ receiverId: user.id, status: "pending", limit: 5 }),
-    repo.messages.countUnread(user.id),
-    // Headline stats need counts over ALL rows, not the 5-row page. Deriving
-    // them by filtering `items` capped every stat at 5 — and read 0 whenever
-    // the 5 most recent rows happened to be closed.
-    repo.requirements.list({ creatorId: user.id, status: "open", limit: 1 }),
-    repo.bookings.list({ customerId: user.id, status: "confirmed", limit: 1 }),
-    repo.bookings.list({
-      customerId: user.id,
-      status: "in_progress",
-      limit: 1,
-    }),
-  ]);
-
-  // `Page.total` is optional by design — cursor-only stores can't supply it.
-  // Fall back to the loaded page length so these counters never render blank.
-  const requirementCount = requirements.total ?? requirements.items.length;
-  const pendingQuoteCount = quotes.total ?? quotes.items.length;
-  const openRequirements =
-    openRequirementsPage.total ?? openRequirementsPage.items.length;
-  const activeBookings =
-    (confirmedPage.total ?? confirmedPage.items.length) +
-    (inProgressPage.total ?? inProgressPage.items.length);
+function SeekerView({
+  data,
+  firstName,
+  isBusiness,
+}: {
+  data: SeekerDashboard;
+  firstName: string;
+  isBusiness: boolean;
+}) {
+  const { stats } = data;
 
   return (
     <>
       <PageHeader
-        title={`Welcome back, ${user.name.split(" ")[0]}`}
+        title={`Welcome back, ${firstName}`}
         description={
-          user.role === "business"
+          isBusiness
             ? "Your open requirements and incoming quotes."
             : "Your jobs, bookings, and quotes in one place."
         }
-        action={
-          <ButtonLink href="/requirements/new">Post a requirement</ButtonLink>
-        }
+        action={<ButtonLink href="/requirements/new">Post a requirement</ButtonLink>}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Open requirements" value={openRequirements} />
-        <Stat label="Pending quotes" value={pendingQuoteCount} />
-        <Stat label="Active bookings" value={activeBookings} />
-        <Stat label="Unread messages" value={unreadMessages} />
+        <Stat label="Open requirements" value={stats.openRequirements} />
+        <Stat label="Pending quotes" value={stats.pendingQuotes} />
+        <Stat label="Active bookings" value={stats.activeBookings} />
+        <Stat label="Unread messages" value={stats.unreadMessages} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -110,7 +88,7 @@ async function SeekerDashboard({ user }: { user: User }) {
           <CardHeader
             title="Quotes awaiting your decision"
             action={
-              pendingQuoteCount > 0 ? (
+              stats.pendingQuotes > 0 ? (
                 <Link
                   href="/requirements"
                   className="text-sm text-[var(--primary)] hover:underline"
@@ -120,7 +98,7 @@ async function SeekerDashboard({ user }: { user: User }) {
               ) : null
             }
           />
-          {quotes.items.length === 0 ? (
+          {data.quotes.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 title="No quotes yet"
@@ -134,7 +112,7 @@ async function SeekerDashboard({ user }: { user: User }) {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
-              {quotes.items.map((quote) => (
+              {data.quotes.map((quote) => (
                 <li key={quote.id}>
                   <Link
                     href={`/quotes/${quote.id}`}
@@ -171,7 +149,7 @@ async function SeekerDashboard({ user }: { user: User }) {
           <CardHeader
             title="Your requirements"
             action={
-              requirementCount > 0 ? (
+              data.requirementCount > 0 ? (
                 <Link
                   href="/requirements"
                   className="text-sm text-[var(--primary)] hover:underline"
@@ -181,7 +159,7 @@ async function SeekerDashboard({ user }: { user: User }) {
               ) : null
             }
           />
-          {requirements.items.length === 0 ? (
+          {data.requirements.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 title="Nothing posted yet"
@@ -190,7 +168,7 @@ async function SeekerDashboard({ user }: { user: User }) {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
-              {requirements.items.map((req) => (
+              {data.requirements.map((req) => (
                 <li key={req.id}>
                   <Link
                     href={`/requirements/${req.id}`}
@@ -205,8 +183,7 @@ async function SeekerDashboard({ user }: { user: User }) {
                       </Badge>
                     </div>
                     <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                      {formatCurrency(req.minBudget)}–
-                      {formatCurrency(req.maxBudget)}
+                      {formatCurrency(req.minBudget)}–{formatCurrency(req.maxBudget)}
                       {req.quoteCount !== undefined
                         ? ` · ${req.quoteCount} quote${req.quoteCount === 1 ? "" : "s"}`
                         : ""}
@@ -220,7 +197,10 @@ async function SeekerDashboard({ user }: { user: User }) {
       </div>
 
       <div className="mt-6">
-        <BookingsCard bookings={bookings.items} emptyHint="Accept a quote to create your first booking." />
+        <BookingsCard
+          bookings={data.bookings}
+          emptyHint="Accept a quote to create your first booking."
+        />
       </div>
     </>
   );
@@ -228,41 +208,38 @@ async function SeekerDashboard({ user }: { user: User }) {
 
 // ─────────────── Digital / local provider (bids on work) ───────────────
 
-async function ProviderDashboard({ user }: { user: User }) {
-  const [feed, myQuotes, bookings, unreadMessages, analytics] =
-    await Promise.all([
-      repo.requirements.feedForProvider(user.id, { limit: 5 }),
-      repo.quotes.list({ senderId: user.id, limit: 5 }),
-      repo.bookings.list({ providerId: user.id, limit: 5 }),
-      repo.messages.countUnread(user.id),
-      repo.analytics.providerAnalytics(user.id, 30),
-    ]);
+function ProviderView({
+  data,
+  firstName,
+  skills,
+}: {
+  data: ProviderDashboard;
+  firstName: string;
+  skills: string[];
+}) {
+  const { stats } = data;
 
   return (
     <>
       <PageHeader
-        title={`Welcome back, ${user.name.split(" ")[0]}`}
+        title={`Welcome back, ${firstName}`}
         description="Work matched to your skills, plus how your profile is performing."
         action={<ButtonLink href="/requirements">Find work</ButtonLink>}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="Profile views"
-          value={analytics.profileViews}
-          hint="Last 30 days"
-        />
+        <Stat label="Profile views" value={stats.profileViews} hint="Last 30 days" />
         <Stat
           label="Quote acceptance"
-          value={`${Math.round(analytics.acceptanceRate * 100)}%`}
-          hint={`${analytics.quotesAccepted} of ${analytics.quotesSent}`}
+          value={`${Math.round(stats.acceptanceRate * 100)}%`}
+          hint={`${stats.quotesAccepted} of ${stats.quotesSent}`}
         />
         <Stat
           label="Total earnings"
-          value={formatCurrency(analytics.totalEarnings)}
-          hint={`${analytics.completedBookings} completed`}
+          value={formatCurrency(stats.totalEarnings)}
+          hint={`${stats.completedBookings} completed`}
         />
-        <Stat label="Unread messages" value={unreadMessages} />
+        <Stat label="Unread messages" value={stats.unreadMessages} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -270,8 +247,8 @@ async function ProviderDashboard({ user }: { user: User }) {
           <CardHeader
             title="Matched to your skills"
             description={
-              user.skills.length > 0
-                ? user.skills.slice(0, 4).join(", ")
+              skills.length > 0
+                ? skills.slice(0, 4).join(", ")
                 : "Add skills to your profile for better matches"
             }
             action={
@@ -283,17 +260,17 @@ async function ProviderDashboard({ user }: { user: User }) {
               </Link>
             }
           />
-          {feed.items.length === 0 ? (
+          {data.feed.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 title="No matching work right now"
                 description={
-                  user.skills.length === 0
+                  skills.length === 0
                     ? "Add skills to your profile so we can match you to requirements."
                     : "Check back shortly — new requirements are posted daily."
                 }
                 action={
-                  user.skills.length === 0 ? (
+                  skills.length === 0 ? (
                     <ButtonLink href="/profile" size="sm">
                       Add skills
                     </ButtonLink>
@@ -303,7 +280,7 @@ async function ProviderDashboard({ user }: { user: User }) {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
-              {feed.items.map((req) => (
+              {data.feed.map((req) => (
                 <li key={req.id}>
                   <Link
                     href={`/requirements/${req.id}`}
@@ -311,8 +288,8 @@ async function ProviderDashboard({ user }: { user: User }) {
                   >
                     <p className="truncate text-sm font-medium">{req.title}</p>
                     <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                      {formatCurrency(req.minBudget)}–
-                      {formatCurrency(req.maxBudget)} · {req.category}
+                      {formatCurrency(req.minBudget)}–{formatCurrency(req.maxBudget)} ·{" "}
+                      {req.category}
                     </p>
                     <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                       Posted {formatRelative(req.createdAt)}
@@ -329,7 +306,7 @@ async function ProviderDashboard({ user }: { user: User }) {
 
         <Card>
           <CardHeader title="Your recent bids" />
-          {myQuotes.items.length === 0 ? (
+          {data.quotes.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 title="No bids yet"
@@ -338,7 +315,7 @@ async function ProviderDashboard({ user }: { user: User }) {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
-              {myQuotes.items.map((quote) => (
+              {data.quotes.map((quote) => (
                 <li key={quote.id}>
                   <Link
                     href={`/quotes/${quote.id}`}
@@ -365,7 +342,7 @@ async function ProviderDashboard({ user }: { user: User }) {
 
       <div className="mt-6">
         <BookingsCard
-          bookings={bookings.items}
+          bookings={data.bookings}
           emptyHint="Win a bid and your bookings will appear here."
         />
       </div>

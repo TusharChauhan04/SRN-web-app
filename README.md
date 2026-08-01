@@ -166,6 +166,68 @@ silently breaks payments.
 
 ---
 
+## Connecting real services
+
+**The app runs with no third-party accounts.** Auth and payments both ship with
+working local implementations, so the whole product can be built and used before
+Firebase or Razorpay exist. Neither is a stub — the mock providers sign and
+verify real credentials and real webhook signatures, so the code paths you rely
+on in production are the ones exercised in development.
+
+Both mock providers **refuse to start when `NODE_ENV=production`**, so a
+half-configured deploy fails loudly instead of authenticating strangers or
+granting paid plans for free.
+
+### Connecting Firebase Auth
+
+1. Register a **Web app** in the Firebase project (additive; changes nothing for
+   the mobile app).
+2. Fill `NEXT_PUBLIC_FIREBASE_*` and the three `FIREBASE_*` service-account vars.
+3. Set `AUTH_PROVIDER=firebase` and `NEXT_PUBLIC_AUTH_PROVIDER=firebase`.
+4. Add your domain under Firebase Auth → Settings → Authorized domains.
+
+No application code changes. Everything speaks `AuthServerProvider` /
+`AuthClientProvider`; only `src/lib/providers/auth/` knows Firebase exists.
+
+### Connecting Razorpay
+
+1. Fill `NEXT_PUBLIC_RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
+   `RAZORPAY_WEBHOOK_SECRET`.
+2. Set `PAYMENT_PROVIDER=razorpay`.
+3. Register the webhook at `<NEXT_PUBLIC_APP_URL>/api/v1/payments/webhook` for
+   the `payment.captured` event.
+
+Order amounts are always re-derived server-side from our own price list, and a
+paid tier is granted **only** from a signature-verified webhook — never from the
+browser claiming success.
+
+---
+
+## The API gateway
+
+The frontend never talks to the database. Every data operation crosses one
+boundary:
+
+```
+  UI  →  gateway  →  service  →  repository  →  provider / database
+```
+
+- **Server components** call `gateway.*` from `@/lib/gateway` — in-process, no
+  HTTP round trip to our own server.
+- **Client components** call `callGateway(...)` from `@/lib/gateway/client`,
+  which posts to `POST /api/v1/:operation`.
+
+Both run the *same* pipeline — resolve context → rate limit → access policy →
+validate input → service → audit — so the public API cannot drift from what
+server rendering does. Adding an operation means adding one `defineOperation`;
+it is then reachable over both transports automatically.
+
+**This is enforced, not documented.** ESLint fails the build if UI imports a
+repository, a service, Prisma, or a provider SDK directly. Try it: importing
+`repo` in a page is an error with a message telling you what to use instead.
+
+---
+
 ## Architecture notes
 
 **The data layer is the important part.** Feature code imports `repo` from

@@ -319,6 +319,7 @@ export class PrismaUserRepository implements UserRepository {
 
   async exportAll(id: string, actor: Actor): Promise<Record<string, unknown>> {
     assertSelfOrAdmin(actor, id, "exportAll");
+
     const [
       user,
       requirements,
@@ -334,6 +335,12 @@ export class PrismaUserRepository implements UserRepository {
       notifications,
       uploads,
       subscription,
+      workingHours,
+      blockedDates,
+      referral,
+      verificationRequests,
+      notificationPrefs,
+      profileViewCount,
     ] = await Promise.all([
       prisma.user.findUnique({ where: { id } }),
       prisma.requirement.findMany({ where: { creatorId: id } }),
@@ -341,8 +348,6 @@ export class PrismaUserRepository implements UserRepository {
       prisma.quote.findMany({ where: { receiverId: id } }),
       prisma.booking.findMany({ where: { customerId: id } }),
       prisma.booking.findMany({ where: { providerId: id } }),
-      // Both sides of every conversation — sender-only produced an export
-      // containing half of each thread, which is not a complete DSAR answer.
       prisma.message.findMany({
         where: { OR: [{ senderId: id }, { receiverId: id }] },
       }),
@@ -353,60 +358,65 @@ export class PrismaUserRepository implements UserRepository {
       prisma.notification.findMany({ where: { userId: id } }),
       prisma.upload.findMany({ where: { userId: id } }),
       prisma.subscription.findUnique({ where: { userId: id } }),
-    ]);
-
-    // Everything else the user owns. Omitting these made the bundle incomplete.
-    const [
-      blocks,
-      reports,
-      workingHours,
-      blockedDates,
-      referral,
-      presence,
-      profileViews,
-      auditEvents,
-      verificationRequests,
-      notificationPrefs,
-    ] = await Promise.all([
-      prisma.block.findMany({
-        where: { OR: [{ blockerId: id }, { blockedId: id }] },
-      }),
-      prisma.report.findMany({
-        where: { OR: [{ reporterId: id }, { reportedId: id }] },
-      }),
       prisma.workingHours.findMany({ where: { userId: id } }),
       prisma.blockedDate.findMany({ where: { userId: id } }),
       prisma.referral.findUnique({ where: { userId: id } }),
-      prisma.presence.findUnique({ where: { userId: id } }),
-      prisma.profileView.findMany({ where: { subjectId: id } }),
-      prisma.auditEvent.findMany({ where: { actorId: id } }),
       prisma.verificationRequest.findMany({ where: { userId: id } }),
       prisma.notificationPref.findUnique({ where: { userId: id } }),
+      // COUNT only — see the redaction note below.
+      prisma.profileView.count({ where: { subjectId: id } }),
     ]);
+
+    /*
+     * REDACTION — a subject access request is not a licence to receive a
+     * DIFFERENT person's personal data. These are the four places where a naive
+     * "everything joined to this user" export leaks someone else:
+     *
+     *  - reviews received: the author is another person, so only the rating and
+     *    text the subject can already see on their own profile are included;
+     *  - reports: entirely omitted. A report filed ABOUT this user would expose
+     *    who reported them and what they wrote;
+     *  - profile views: a count, never the viewer ids;
+     *  - blocks: omitted, since either direction names another user.
+     *
+     * Messages the user sent or received ARE included: they were a party to
+     * those conversations and already hold the content.
+     */
+    const reviewsReceivedRedacted = reviewsReceived.map((review) => ({
+      id: review.id,
+      bookingId: review.bookingId,
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.createdAt,
+      // authorId deliberately omitted.
+    }));
 
     return {
       exportedAt: new Date().toISOString(),
+      notice:
+        "Contains your personal data only. Information identifying other " +
+        "people (who reviewed you, who reported you, who viewed your profile, " +
+        "block lists) is deliberately excluded.",
       user,
       requirements,
       quotes: { sent: quotesSent, received: quotesReceived },
-      bookings: { asCustomer: bookingsAsCustomer, asProvider: bookingsAsProvider },
+      bookings: {
+        asCustomer: bookingsAsCustomer,
+        asProvider: bookingsAsProvider,
+      },
       messages,
-      reviews: { written: reviewsWritten, received: reviewsReceived },
+      reviews: { written: reviewsWritten, received: reviewsReceivedRedacted },
       disputes,
       portfolio,
       notifications,
       uploads,
       subscription,
-      blocks,
-      reports,
       workingHours,
       blockedDates,
       referral,
-      presence,
-      profileViews,
-      auditEvents,
       verificationRequests,
       notificationPrefs,
+      profileViews: { count: profileViewCount },
     };
   }
 
