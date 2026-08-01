@@ -2,7 +2,7 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phases 0–4 done. Phase 5 (admin panel) is next.
+**Status:** Phases 0–5 done. Phase 6 (referrals, phone verification, GDPR UI) is next.
 **Last updated:** 2026-08-01
 
 ## Resume here
@@ -25,10 +25,9 @@ Auth and payments are pluggable providers with working local implementations,
 so the app runs with no third-party credentials. See README "Connecting real
 services".
 
-**Next step:** Phase 5 — the admin panel. Use `access: "admin"` on the gateway
-operations; that is the only gate needed, and it is checked server-side before
-the handler runs. Copy the pattern from any Phase 3/4 screen:
-page → `gateway.*` → service → repo.
+**Next step:** Phase 6 — referrals, phone verification, and the GDPR
+export/delete UI. That leaves only the web-push decision (Phase 7) and the
+deployment checklist (Phase 8).
 
 **File storage** now exists as a provider too (`src/lib/providers/storage/`),
 with a working local implementation. Firebase Storage is stubbed with a clear
@@ -308,16 +307,16 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
-| Admin dashboard | `dashboards/AdminDashboard.tsx` | `/admin` | users, requirements, quotes, bookings, disputes | none | Not Started | |
-| Users management | `admin/UsersScreen.tsx` | `/admin/users` | users, audit_events | **PII/AUTH/DATA_DELETION** | Not Started | `setRole` is privilege escalation and `delete` is a hard delete — not PII alone |
-| Delete user | `routes/admin.ts:307` | `/admin/users` | users | DATA_DELETION | Not Started | |
-| Disputes management | `admin/DisputesManagementScreen.tsx` | `/admin/disputes` | disputes | PII | Not Started | resolve |
-| Verification queue | `admin/VerificationQueueScreen.tsx` | `/admin/verification` | verification_requests | PII | Not Started | KYC approve/reject |
-| Feature flags | `routes/admin.ts:466` | `/admin/flags` | feature_flags | INFRA | Not Started | no mobile screen — backend-only today |
-| Fraud views | `routes/admin.ts:510,564` | `/admin/fraud` | users, reviews | PII | Not Started | no mobile screen |
-| Revenue / growth stats | `routes/admin.ts:598,627` | `/admin/revenue` | subscriptions, users | none | Not Started | no mobile screen |
-| Audit log viewer | `routes/admin.ts:121` | `/admin/audit` | audit_events | PII | Not Started | no mobile screen |
-| Flagged messages | `routes/admin.ts:414` | `/admin/moderation` | messages, reports | PII | Not Started | no mobile screen |
+| Admin dashboard | `dashboards/AdminDashboard.tsx` | `/admin` | users, requirements, quotes, bookings, disputes | none | **Ported** | |
+| Users management | `admin/UsersScreen.tsx` | `/admin/users` | users, audit_events | **PII/AUTH/DATA_DELETION** | **Ported** | `setRole` is privilege escalation and `delete` is a hard delete — not PII alone |
+| Delete user | `routes/admin.ts:307` | `/admin/users` | users | DATA_DELETION | **Ported** | |
+| Disputes management | `admin/DisputesManagementScreen.tsx` | `/admin/disputes` | disputes | PII | **Ported** | resolve |
+| Verification queue | `admin/VerificationQueueScreen.tsx` | `/admin/verification` | verification_requests | PII | **Ported** | KYC approve/reject |
+| Feature flags | `routes/admin.ts:466` | `/admin/flags` | feature_flags | INFRA | **Ported** | no mobile screen — backend-only today |
+| Fraud views | `routes/admin.ts:510,564` | `/admin/fraud` | users, reviews | PII | **Ported** | no mobile screen |
+| Revenue / growth stats | `routes/admin.ts:598,627` | `/admin/revenue` | subscriptions, users | none | **Ported** | no mobile screen |
+| Audit log viewer | `routes/admin.ts:121` | `/admin/audit` | audit_events | PII | **Ported** | no mobile screen |
+| Flagged messages | `routes/admin.ts:414` | `/admin/moderation` | messages, reports | PII | **Ported** | no mobile screen |
 
 > Admin rows marked "no mobile screen" have backend endpoints but no mobile UI.
 > Building them is **in scope** — the brief explicitly says the admin panel exists

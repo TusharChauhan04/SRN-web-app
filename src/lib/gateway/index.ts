@@ -22,6 +22,7 @@ import * as req from "./operations/requirements";
 import * as book from "./operations/bookings";
 import * as acct from "./operations/account";
 import * as prov from "./operations/provider";
+import * as adm from "./operations/admin";
 
 /** Extracts an operation's validated input type, so call sites stay honest. */
 type In<T> = T extends { input: { parse: (v: unknown) => infer R } } ? R : never;
@@ -183,6 +184,53 @@ export const gateway = {
       invoke(prov.createCheckout, input),
     cancel: () => invoke(prov.cancelSubscription, undefined),
   },
+
+  /**
+   * Admin surface. Every operation is `access: "admin"`, enforced by the
+   * gateway before the handler runs — the /admin route guards are convenience,
+   * not the security boundary.
+   */
+  admin: {
+    overview: () => invoke(adm.overview, undefined),
+
+    listUsers: (input: In<typeof adm.listUsers> = {}) =>
+      invoke(adm.listUsers, input),
+    setSuspended: (input: In<typeof adm.setSuspended>) =>
+      invoke(adm.setSuspended, input),
+    setRole: (input: In<typeof adm.setRole>) => invoke(adm.setRole, input),
+    eraseUser: (input: In<typeof adm.eraseUser>) =>
+      invoke(adm.eraseUser, input),
+
+    listDisputes: (input: In<typeof adm.listDisputes> = {}) =>
+      invoke(adm.listDisputes, input),
+    resolveDispute: (input: In<typeof adm.resolveDispute>) =>
+      invoke(adm.resolveDispute, input),
+
+    listVerifications: (input: In<typeof adm.listVerifications> = {}) =>
+      invoke(adm.listVerifications, input),
+    verificationDocuments: (input: In<typeof adm.getVerificationDocuments>) =>
+      invoke(adm.getVerificationDocuments, input),
+    approveVerification: (input: In<typeof adm.approveVerification>) =>
+      invoke(adm.approveVerification, input),
+    rejectVerification: (input: In<typeof adm.rejectVerification>) =>
+      invoke(adm.rejectVerification, input),
+
+    flaggedMessages: (input: In<typeof adm.listFlaggedMessages> = {}) =>
+      invoke(adm.listFlaggedMessages, input),
+    clearMessageFlag: (input: In<typeof adm.clearMessageFlag>) =>
+      invoke(adm.clearMessageFlag, input),
+    listReports: (input: In<typeof adm.listReports> = {}) =>
+      invoke(adm.listReports, input),
+    resolveReport: (input: In<typeof adm.resolveReport>) =>
+      invoke(adm.resolveReport, input),
+
+    fraud: () => invoke(adm.fraud, undefined),
+    revenue: () => invoke(adm.revenue, undefined),
+    listFlags: () => invoke(adm.listFlags, undefined),
+    setFlag: (input: In<typeof adm.setFlag>) => invoke(adm.setFlag, input),
+    listAudit: (input: In<typeof adm.listAudit> = {}) =>
+      invoke(adm.listAudit, input),
+  },
 } as const;
 
 /**
@@ -198,6 +246,7 @@ export function loadOperations(): void {
   void book;
   void acct;
   void prov;
+  void adm;
 }
 
 export { getOperation, invoke, registeredOperationNames } from "./core";
