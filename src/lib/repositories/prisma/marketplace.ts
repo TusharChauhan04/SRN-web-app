@@ -255,15 +255,21 @@ export class PrismaQuoteRepository implements QuoteRepository {
   }
 
   async shortlist(requirementId: string, quoteId: string): Promise<Quote> {
-    const row = await prisma.quote.update({
-      where: { id: quoteId },
+    // Scope the update by requirementId so a quote belonging to someone else's
+    // requirement cannot be shortlisted. The previous version wrote first and
+    // validated afterwards, which threw but left the row already mutated.
+    const result = await prisma.quote.updateMany({
+      where: { id: quoteId, requirementId },
       data: { status: "shortlisted" },
-      include: QUOTE_INCLUDE,
     });
-    // Guard against a quote id from a different requirement being shortlisted.
-    if (row.requirementId !== requirementId) {
+    if (result.count === 0) {
       throw new Error("Quote does not belong to this requirement");
     }
+
+    const row = await prisma.quote.findUniqueOrThrow({
+      where: { id: quoteId },
+      include: QUOTE_INCLUDE,
+    });
     return toQuote(row);
   }
 
@@ -346,7 +352,18 @@ export class PrismaBookingRepository implements BookingRepository {
   }
 
   async updateStatus(id: string, status: BookingStatus): Promise<Booking> {
-    const row = await prisma.booking.update({
+    const existing = await prisma.booking.findUnique({
+      where: { id },
+      select: { providerId: true, status: true },
+    });
+    if (!existing) throw new Error("Booking not found");
+
+    // Only count the gig on the transition INTO completed. Without this guard,
+    // re-completing an already-completed booking inflates the counter.
+    const shouldIncrement =
+      status === "completed" && existing.status !== "completed";
+
+    const updateBooking = prisma.booking.update({
       where: { id },
       data: {
         status,
@@ -357,12 +374,16 @@ export class PrismaBookingRepository implements BookingRepository {
       include: BOOKING_INCLUDE,
     });
 
-    if (status === "completed") {
-      await prisma.user.update({
-        where: { id: row.providerId },
-        data: { completedGigs: { increment: 1 } },
-      });
-    }
+    const [row] = shouldIncrement
+      ? await prisma.$transaction([
+          updateBooking,
+          prisma.user.update({
+            where: { id: existing.providerId },
+            data: { completedGigs: { increment: 1 } },
+          }),
+        ])
+      : [await updateBooking];
+
     return toBooking(row);
   }
 
@@ -407,17 +428,37 @@ const REVIEW_INCLUDE = {
 
 export class PrismaReviewRepository implements ReviewRepository {
   async create(input: CreateReviewInput): Promise<Review> {
-    const row = await prisma.review.create({
-      data: {
-        bookingId: input.bookingId,
-        authorId: input.authorId,
-        subjectId: input.subjectId,
-        rating: input.rating,
-        comment: input.comment ?? null,
-      },
-      include: REVIEW_INCLUDE,
+    // Interactive transaction: the cached rating must never be observable
+    // without the review that produced it, and the aggregate has to run after
+    // the insert, so this cannot be expressed as a batch array.
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.review.create({
+        data: {
+          bookingId: input.bookingId,
+          authorId: input.authorId,
+          subjectId: input.subjectId,
+          rating: input.rating,
+          comment: input.comment ?? null,
+        },
+        include: REVIEW_INCLUDE,
+      });
+
+      const agg = await tx.review.aggregate({
+        where: { subjectId: input.subjectId },
+        _avg: { rating: true },
+        _count: { _all: true },
+      });
+      await tx.user.update({
+        where: { id: input.subjectId },
+        data: {
+          rating: agg._avg.rating ?? 0,
+          reviewsCount: agg._count._all,
+        },
+      });
+
+      return created;
     });
-    await this.recomputeSubjectRating(input.subjectId);
+
     return toReview(row);
   }
 
@@ -464,8 +505,23 @@ export class PrismaReviewRepository implements ReviewRepository {
       where: { id },
       select: { subjectId: true },
     });
-    await prisma.review.delete({ where: { id } });
-    if (existing) await this.recomputeSubjectRating(existing.subjectId);
+    if (!existing) return;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.review.delete({ where: { id } });
+      const agg = await tx.review.aggregate({
+        where: { subjectId: existing.subjectId },
+        _avg: { rating: true },
+        _count: { _all: true },
+      });
+      await tx.user.update({
+        where: { id: existing.subjectId },
+        data: {
+          rating: agg._avg.rating ?? 0,
+          reviewsCount: agg._count._all,
+        },
+      });
+    });
   }
 
   async recomputeSubjectRating(subjectId: string): Promise<void> {

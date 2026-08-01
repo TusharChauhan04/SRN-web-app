@@ -270,20 +270,23 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
       throw new Error(`No subscription found for order ${razorpayOrderId}`);
     }
 
-    const row = await prisma.subscription.update({
-      where: { id: existing.id },
-      data: {
-        status: "active",
-        razorpayPaymentId,
-        currentPeriodEnd: periodEnd,
-        cancelAtPeriodEnd: false,
-      },
-    });
-
-    await prisma.user.update({
-      where: { id: row.userId },
-      data: { isPremium: row.tier !== "free" },
-    });
+    // Money path: the subscription row and the user's premium flag must land
+    // together, or a paid user can be left without the entitlement they bought.
+    const [row] = await prisma.$transaction([
+      prisma.subscription.update({
+        where: { id: existing.id },
+        data: {
+          status: "active",
+          razorpayPaymentId,
+          currentPeriodEnd: periodEnd,
+          cancelAtPeriodEnd: false,
+        },
+      }),
+      prisma.user.update({
+        where: { id: existing.userId },
+        data: { isPremium: existing.tier !== "free" },
+      }),
+    ]);
 
     return toSubscription(row);
   }

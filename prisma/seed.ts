@@ -376,7 +376,7 @@ async function main() {
 
   console.log("Seeding bookings…");
 
-  const booking1 = await prisma.booking.create({
+  await prisma.booking.create({
     data: {
       quoteId: quote2.id,
       requirementId: req2.id,

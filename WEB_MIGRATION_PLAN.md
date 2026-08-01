@@ -395,13 +395,35 @@ and does not modify the mobile app.
 Also add `localhost` to Firebase Auth → Settings → Authorized domains, or the
 Google popup will be rejected.
 
-### 8.3 Review agents that could not run
+### 8.3 Review status — partial
 
-Per §7, `database-reviewer`, `test-executor`, `ux-reviewer`,
-`accessibility-reviewer`, `release-auditor` and `/full-review-pipeline` do not
-exist in this environment. No agent-based review has been run on Phases 1–2
-yet — the available agents (`code-reviewer`, `security-reviewer`,
-`architecture-reviewer`, `risk-classifier`, `test-generater`) still need to be
-run over the auth and data-layer code, which is `AUTH`-risk territory.
+Two separate gaps, do not conflate them.
 
-**Nothing in this repo has been security-reviewed yet.**
+**Agents that do not exist in this environment** (per §7):
+`database-reviewer`, `test-executor`, `ux-reviewer`, `accessibility-reviewer`,
+`release-auditor`, `/full-review-pipeline`.
+
+**Agents that exist but failed to complete** — hit an API session limit
+mid-run on 2026-08-01: `security-reviewer`, `code-reviewer`,
+`risk-classifier`. These need re-running.
+
+**Completed:** `architecture-reviewer` only. Its findings were applied — see
+the commit "Apply architecture review findings".
+
+> **Nothing in this repo has been security-reviewed.** The auth flow, session
+> cookie handling, role gating, and the GDPR/KYC paths in the repository layer
+> are all unreviewed `AUTH`/`PII` surface. Re-run `security-reviewer`,
+> `code-reviewer`, and `risk-classifier` before this is treated as
+> production-ready or before Phase 4 adds payments.
+
+**Known-unfixed findings from the architecture review** (deliberately deferred,
+not forgotten):
+
+| Finding | Why deferred |
+|---|---|
+| `mappers.ts` types its input as `Record<string, unknown>` and casts every field, so a renamed column typechecks clean | Real gap. `DATABASE.md` §4 was corrected to stop claiming typecheck catches this, and the seed does catch it. Tightening to `Prisma.*GetPayload<...>` is the proper fix |
+| Optional joined fields (`Requirement.quoteCount`, `Conversation.counterpart`/`unreadCount`) are populated by some repository methods and not others, with no type-level signal | Should be split into `Requirement` vs `RequirementListItem` etc. **Do this before Phase 3 grows more call sites** |
+| No `services/` layer; policy logic (dispute→booking transitions, verification→isVerified) lives inside repositories | Recommended: add `services/` plus a `transaction()` method on the registry, move *policy* out but keep *invariants* in |
+| `RateLimitRepository` is not really a repository, and its `hit()` is check-then-act (TOCTOU) on the auth path | Should move to `src/lib/ratelimit/` with its own provider interface |
+| No tests, no test runner | Blocks `test-generater` / `test-executor` from being useful |
+| `components/ui.tsx` is one file exporting ~12 components | Split to `components/ui/` before Phase 3 |

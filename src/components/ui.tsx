@@ -285,10 +285,10 @@ export function Avatar({
     .toUpperCase();
 
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element -- avatar URLs are
-    // user-supplied and arbitrary-origin; next/image would need every host
-    // allow-listed up front.
+    // Avatar URLs are user-supplied and arbitrary-origin; next/image would
+    // need every host allow-listed up front, so a plain img is correct here.
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={src}
         alt=""

@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/session";
 import { repo } from "@/lib/repositories";
-import { isProviderRole, type User } from "@/lib/repositories/types";
+import {
+  isProviderRole,
+  type Booking,
+  type User,
+} from "@/lib/repositories/types";
 import {
   Avatar,
   Badge,
@@ -52,6 +56,11 @@ async function SeekerDashboard({ user }: { user: User }) {
     repo.messages.countUnread(user.id),
   ]);
 
+  // `Page.total` is optional by design — cursor-only stores can't supply it.
+  // Fall back to the loaded page length so these counters never render blank.
+  const requirementCount = requirements.total ?? requirements.items.length;
+  const pendingQuoteCount = quotes.total ?? quotes.items.length;
+
   const openRequirements = requirements.items.filter(
     (r) => r.status === "open",
   ).length;
@@ -75,7 +84,7 @@ async function SeekerDashboard({ user }: { user: User }) {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Open requirements" value={openRequirements} />
-        <Stat label="Pending quotes" value={quotes.total} />
+        <Stat label="Pending quotes" value={pendingQuoteCount} />
         <Stat label="Active bookings" value={activeBookings} />
         <Stat label="Unread messages" value={unreadMessages} />
       </div>
@@ -85,7 +94,7 @@ async function SeekerDashboard({ user }: { user: User }) {
           <CardHeader
             title="Quotes awaiting your decision"
             action={
-              quotes.total > 0 ? (
+              pendingQuoteCount > 0 ? (
                 <Link
                   href="/requirements"
                   className="text-sm text-[var(--primary)] hover:underline"
@@ -146,7 +155,7 @@ async function SeekerDashboard({ user }: { user: User }) {
           <CardHeader
             title="Your requirements"
             action={
-              requirements.total > 0 ? (
+              requirementCount > 0 ? (
                 <Link
                   href="/requirements"
                   className="text-sm text-[var(--primary)] hover:underline"
@@ -354,7 +363,7 @@ function BookingsCard({
   bookings,
   emptyHint,
 }: {
-  bookings: Awaited<ReturnType<typeof repo.bookings.list>>["items"];
+  bookings: Booking[];
   emptyHint: string;
 }) {
   return (

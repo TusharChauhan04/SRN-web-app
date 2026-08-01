@@ -9,7 +9,7 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import * as Icons from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { isActive, navForRole } from "@/lib/nav/config";
@@ -98,12 +98,11 @@ function SidebarFooter({ user }: { user: User }) {
 }
 
 export function Sidebar({ user }: { user: User }) {
-  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  // Close the drawer on navigation — otherwise it covers the page you just
-  // opened on a small screen.
-  useEffect(() => setOpen(false), [pathname]);
+  // The drawer closes from the link's own onClick (see NavLinks) and from the
+  // backdrop. An effect keyed on pathname would do the same thing via a
+  // cascading render, so it isn't used.
 
   return (
     <>

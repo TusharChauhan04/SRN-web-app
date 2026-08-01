@@ -252,6 +252,11 @@ model Dispute {
   resolvedById String?
   resolvedAt DateTime?
 
+  /// The booking's status before the dispute moved it to "disputed".
+  /// Without this, closing a dispute cannot restore the booking correctly —
+  /// a cancelled or in-progress booking would be silently marked completed.
+  previousBookingStatus String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

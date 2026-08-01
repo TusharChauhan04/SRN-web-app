@@ -182,7 +182,14 @@ export interface QuoteRepository {
   /** Marks one quote shortlisted — /requirements/:id/shortlist/:quoteId. */
   shortlist(requirementId: string, quoteId: string): Promise<Quote>;
   delete(id: string): Promise<void>;
-  /** Guards the "one active bid per provider per requirement" rule. */
+  /**
+   * True when this provider already has a live bid on this requirement.
+   *
+   * Advisory only — this is check-then-act, so two concurrent submissions can
+   * both pass. A database unique constraint is deliberately NOT used, because
+   * it would also block a legitimate re-bid after a withdrawal or rejection.
+   * Callers should treat a duplicate as a UX problem, not a data-integrity one.
+   */
   existsForSenderOnRequirement(
     senderId: string,
     requirementId: string,

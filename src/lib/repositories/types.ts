@@ -374,19 +374,32 @@ export interface Report {
 // ─────────────────────────── Query helpers ───────────────────────────
 
 /**
- * Cursor-free offset pagination. Kept simple deliberately: the mobile screens
- * this ports from use limit/offset lists, not infinite cursors.
+ * A page of results.
+ *
+ * `total` and `offset` are OPTIONAL on purpose. The Prisma implementation fills
+ * both, and the mobile screens this ports from use offset paging — but Firestore
+ * and DynamoDB cannot do offsets or cheap filtered counts at all. Keeping these
+ * optional, and carrying a cursor alongside, means swapping to one of those
+ * stores does not require changing 16 method signatures and every list screen.
+ *
+ * Callers must therefore treat `total` as a hint, not a guarantee: render
+ * "showing N" rather than "N of M" unless `total` is present.
  */
 export interface Page<T> {
   items: T[];
-  total: number;
   limit: number;
-  offset: number;
+  /** Present for offset-capable stores (Prisma/SQL, Mongo). */
+  total?: number;
+  offset?: number;
+  /** Opaque continuation token for cursor-only stores. */
+  nextCursor?: string | null;
 }
 
 export interface PageParams {
   limit?: number;
   offset?: number;
+  /** Opaque token from a previous `Page.nextCursor`. */
+  cursor?: string;
 }
 
 export const DEFAULT_PAGE_LIMIT = 20;

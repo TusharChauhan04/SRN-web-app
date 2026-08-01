@@ -122,7 +122,19 @@ Nothing under `src/app/` or `src/components/` changes in this path.
 
 ### Case B — the choice is not SQL (document store, or a vendor SDK)
 
-The repository interfaces still do their job; only the implementations change.
+The repository interfaces still do their job; only the implementations change —
+**with one caveat that is not free.**
+
+> **`Page<T>` assumes offset pagination.** It requires `total` and `offset`
+> (`src/lib/repositories/types.ts`), which MongoDB can satisfy
+> (`skip`/`limit`/`countDocuments`) but **Firestore and DynamoDB cannot** —
+> DynamoDB has no offset at all, only cursors, and neither offers a cheap
+> filtered total. Picking one of those means changing `Page<T>` and every list
+> signature that returns it (16 methods) plus their call sites.
+>
+> Making `total` optional and adding an optional cursor to `PageParams` now
+> costs about an hour and removes this constraint. Worth doing before the
+> screen count grows.
 
 1. Create `src/lib/repositories/<vendor>/` alongside `prisma/`.
 2. Implement each interface from `src/lib/repositories/interfaces.ts`. The
@@ -152,8 +164,16 @@ pnpm db:reset        # drop, re-migrate, re-seed
 pnpm db:deploy       # apply existing migrations (use in CI/production)
 ```
 
-After **any** schema change: run `pnpm db:migrate`, then `pnpm typecheck` —
-the mappers are typed against the generated client and will catch drift.
+After **any** schema change: run `pnpm db:migrate`, then `pnpm typecheck`, then
+`pnpm db:seed`.
+
+> **`typecheck` does not catch mapper drift.** `mappers.ts` types its input as
+> `Record<string, unknown>` and casts every field, so renaming a column
+> typechecks clean while the mapper silently returns `undefined`. The seed is
+> what actually catches it, because it writes and reads every table. Tightening
+> the mapper input types to `Prisma.*GetPayload<...>` is tracked as a fix —
+> Prisma types are permitted inside `repositories/prisma/`, which is exactly
+> where the mappers live.
 
 ---
 

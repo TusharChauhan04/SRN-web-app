@@ -7,13 +7,7 @@ import "server-only";
  * believed after `verifyIdToken` succeeds here; the user's ROLE is never read
  * from the token, only from our own database (see src/lib/auth/session.ts).
  */
-import {
-  cert,
-  getApp,
-  getApps,
-  initializeApp,
-  type App,
-} from "firebase-admin/app";
+import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { SESSION_COOKIE_MAX_AGE_MS } from "@/lib/auth/cookie";
 

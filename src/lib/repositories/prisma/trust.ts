@@ -30,6 +30,17 @@ const DISPUTE_INCLUDE = {
 
 export class PrismaDisputeRepository implements DisputeRepository {
   async create(input: CreateDisputeInput): Promise<Dispute> {
+    const booking = await prisma.booking.findUnique({
+      where: { id: input.bookingId },
+      select: { status: true },
+    });
+    if (!booking) throw new Error("Booking not found");
+
+    // Remember where the booking was so resolve() can put it back. Guard
+    // against a second dispute overwriting this with "disputed" itself.
+    const previousBookingStatus =
+      booking.status === "disputed" ? null : booking.status;
+
     const [row] = await prisma.$transaction([
       prisma.dispute.create({
         data: {
@@ -38,6 +49,7 @@ export class PrismaDisputeRepository implements DisputeRepository {
           reason: input.reason,
           details: input.details,
           evidenceUrls: joinList(input.evidenceUrls),
+          previousBookingStatus,
         },
         include: DISPUTE_INCLUDE,
       }),
@@ -101,17 +113,32 @@ export class PrismaDisputeRepository implements DisputeRepository {
     resolvedById: string,
     status: Extract<DisputeStatus, "resolved" | "rejected">,
   ): Promise<Dispute> {
-    const row = await prisma.dispute.update({
+    const existing = await prisma.dispute.findUnique({
       where: { id },
-      data: { status, resolution, resolvedById, resolvedAt: new Date() },
-      include: DISPUTE_INCLUDE,
+      select: { bookingId: true, previousBookingStatus: true, status: true },
     });
+    if (!existing) throw new Error("Dispute not found");
+    if (existing.status === "resolved" || existing.status === "rejected") {
+      throw new Error("Dispute is already closed");
+    }
 
-    // Release the booking back to completed once the dispute is closed out.
-    await prisma.booking.update({
-      where: { id: row.bookingId },
-      data: { status: "completed" },
-    });
+    // Restore the booking to where it was before the dispute. Falling back to
+    // "completed" only when the prior status is unknown — marking a cancelled
+    // or still-in-progress booking "completed" is what the old code did, and it
+    // was wrong in both directions.
+    const restoredStatus = existing.previousBookingStatus ?? "completed";
+
+    const [row] = await prisma.$transaction([
+      prisma.dispute.update({
+        where: { id },
+        data: { status, resolution, resolvedById, resolvedAt: new Date() },
+        include: DISPUTE_INCLUDE,
+      }),
+      prisma.booking.update({
+        where: { id: existing.bookingId },
+        data: { status: restoredStatus },
+      }),
+    ]);
 
     return toDispute(row);
   }
@@ -188,22 +215,31 @@ export class PrismaVerificationRepository implements VerificationRepository {
     reviewedById: string,
     note?: string,
   ): Promise<VerificationRequest> {
-    const row = await prisma.verificationRequest.update({
+    const existing = await prisma.verificationRequest.findUnique({
       where: { id },
-      data: {
-        status: "approved",
-        reviewedById,
-        reviewNote: note ?? null,
-        reviewedAt: new Date(),
-      },
-      include: VERIFICATION_INCLUDE,
+      select: { userId: true },
     });
+    if (!existing) throw new Error("Verification request not found");
 
-    // Approval is what actually grants the verified badge.
-    await prisma.user.update({
-      where: { id: row.userId },
-      data: { isVerified: true },
-    });
+    // Approval is what actually grants the verified badge, so the two writes
+    // must land together — a half-applied approval leaves an approved request
+    // against an unverified user.
+    const [row] = await prisma.$transaction([
+      prisma.verificationRequest.update({
+        where: { id },
+        data: {
+          status: "approved",
+          reviewedById,
+          reviewNote: note ?? null,
+          reviewedAt: new Date(),
+        },
+        include: VERIFICATION_INCLUDE,
+      }),
+      prisma.user.update({
+        where: { id: existing.userId },
+        data: { isVerified: true },
+      }),
+    ]);
 
     return toVerificationRequest(row);
   }
