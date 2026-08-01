@@ -2,8 +2,26 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phase 0 complete. Phase 1 not started.
+**Status:** Phases 0–2 done. Phase 3 (customer/business flows) is next.
 **Last updated:** 2026-08-01
+
+## Resume here
+
+**What exists and works:** production build passes clean; `/` and `/dashboard`
+redirect to `/login` when signed out; `/login` renders; `/api/healthz` returns
+`database: up`. Data layer is complete and seeded (`pnpm db:seed`).
+
+**Next step:** Phase 3, starting with `/requirements/new` (post a requirement) and
+`/requirements/[id]` (detail + quote list + shortlist). The dashboard already links
+to both. Follow the pattern established in `(app)/dashboard/page.tsx`: server
+component → `requireUser()` → `repo.*` → render. Mutations go through Server
+Actions like `(auth)/onboarding/actions.ts`, or Route Handlers where a client
+component needs to call them.
+
+**Two blockers a human must clear** (see §8 at the bottom):
+1. `git push` is denied — the local credential lacks write access to the repo.
+   Two commits are sitting unpushed.
+2. Firebase credentials are not set, so no one can actually sign in yet.
 
 This file is the source of truth for the migration. Not the original prompt, not
 anyone's memory. Update the status column as work lands. A fresh session should be
@@ -335,3 +353,55 @@ met in this environment and must not be reported as met.**
 
 **Repo:** `https://github.com/TusharChauhan04/SRN-web-app.git` (was empty at clone
 time). The mobile repo is read-only reference and is not modified.
+---
+
+## 8. Open blockers for a human
+
+### 8.1 Push access denied
+
+`git push` to `https://github.com/TusharChauhan04/SRN-web-app.git` fails:
+
+```
+remote: Permission to TusharChauhan04/SRN-web-app.git denied to Info-DNT.
+fatal: ... error: 403
+```
+
+The machine's cached GitHub credential is the account `Info-DNT`, which does not
+have write access to a repo owned by `TusharChauhan04`. Work is committed
+locally and safe; nothing is lost.
+
+Any one of these unblocks it:
+- add `Info-DNT` as a collaborator on the repo, or
+- switch the machine's git credential to the `TusharChauhan04` account
+  (Windows Credential Manager → `git:https://github.com`), or
+- point `origin` at a repo the current account can write to.
+
+Then: `git push -u origin main`.
+
+### 8.2 Firebase credentials not set
+
+`/api/healthz` currently reports `"firebaseAdmin": "missing"`. Sign-in cannot
+work until both halves are configured in `.env.local`:
+
+- `NEXT_PUBLIC_FIREBASE_*` — Firebase Console → Project settings → Web app
+- `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` —
+  Project settings → Service accounts → Generate new private key
+
+The mobile app uses Firebase project `skill-requirement-network`. Reusing it
+keeps one identity across mobile and web (the recorded decision in §1) — that
+requires registering a **Web app** in that existing project, which is additive
+and does not modify the mobile app.
+
+Also add `localhost` to Firebase Auth → Settings → Authorized domains, or the
+Google popup will be rejected.
+
+### 8.3 Review agents that could not run
+
+Per §7, `database-reviewer`, `test-executor`, `ux-reviewer`,
+`accessibility-reviewer`, `release-auditor` and `/full-review-pipeline` do not
+exist in this environment. No agent-based review has been run on Phases 1–2
+yet — the available agents (`code-reviewer`, `security-reviewer`,
+`architecture-reviewer`, `risk-classifier`, `test-generater`) still need to be
+run over the auth and data-layer code, which is `AUTH`-risk territory.
+
+**Nothing in this repo has been security-reviewed yet.**
