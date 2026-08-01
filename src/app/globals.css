@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens ported from the mobile app's src/constants/colors.ts.
+ *
+ * That file was already a shadcn-shaped semantic token set with both a light
+ * and a dark palette, so this is a direct 1:1 port — not a reinterpretation.
+ * Keep the two in sync if either side changes.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+
+  /* Role accents — ported from ROLE_COLORS in mobile src/types/roles.ts */
+  --color-role-business: var(--role-business);
+  --color-role-customer: var(--role-customer);
+  --color-role-digital: var(--role-digital);
+  --color-role-local: var(--role-local);
+  --color-role-admin: var(--role-admin);
+
+  --radius-token: var(--radius);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #1e293b;
+  --secondary-foreground: #ffffff;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #14b8a6;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+
+  /* Role accents are theme-independent — same hues on mobile in both modes. */
+  --role-business: #7c3aed;
+  --role-customer: #2563eb;
+  --role-digital: #0d9488;
+  --role-local: #ea580c;
+  --role-admin: #dc2626;
+
+  /* Mobile uses a 16px corner radius ("premium high-rounded"). */
+  --radius: 16px;
+}
+
+/*
+ * Dark mode is class-driven rather than media-driven so an explicit user choice
+ * can win over the OS setting later. Mobile's dark palette, ported verbatim.
+ */
+.dark {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --card: #1e293b;
+  --card-foreground: #f8fafc;
+  --primary: #a78bfa;
+  --primary-foreground: #0f172a;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #2dd4bf;
+  --accent-foreground: #0f172a;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --border: #334155;
+  --input: #334155;
+}
+
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Visible focus for keyboard users on every interactive element. */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Standard card surface — used by nearly every ported screen. */
+  .surface {
+    background: var(--card);
+    color: var(--card-foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+}

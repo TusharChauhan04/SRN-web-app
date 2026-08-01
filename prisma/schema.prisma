@@ -1,0 +1,491 @@
+// SRN Web — placeholder schema.
+//
+// IMPORTANT: SQLite is a PLACEHOLDER. The real database has not been chosen.
+// Nothing in the app imports PrismaClient directly — all access goes through the
+// repository interfaces in src/lib/repositories. See DATABASE.md before swapping.
+//
+// SQLite constraints reflected here (and what changes on a real DB):
+//   - no native enums     -> roles/statuses are String, validated by Zod at the edge
+//   - no native String[]  -> list fields are comma-joined or JSON strings
+//   - no native Json type -> metadata fields are String holding JSON
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Identity & profile ───────────────────────────
+
+/// Keyed by Firebase Auth uid. Firebase owns identity (email, verification,
+/// password); this row owns everything the application needs about the user.
+model User {
+  id    String @id // Firebase uid
+  email String @unique
+  name  String
+  role  String // business | customer | digital | local | admin
+
+  // Shared optional profile
+  phone         String?
+  bio           String?
+  location      String?
+  avatarUrl     String?
+  isVerified    Boolean @default(false)
+  isPremium     Boolean @default(false)
+  isSuspended   Boolean @default(false)
+  phoneVerified Boolean @default(false)
+
+  // Provider (digital / local)
+  title           String?
+  skills          String? // comma-joined
+  portfolioLinks  String? // comma-joined
+  hourlyRate      Float?
+  rating          Float?  @default(0)
+  reviewsCount    Int     @default(0)
+  completedGigs   Int     @default(0)
+  onTimeRate      Float?
+  rehireCount     Int     @default(0)
+  aiTrustScore    Float?
+  serviceRadiusKm Float?
+  isAvailable     Boolean @default(true)
+
+  // Business
+  companyName             String?
+  industry                String?
+  postedRequirementsCount Int     @default(0)
+
+  // Admin
+  privileges String? // comma-joined
+
+  // Push — modelled even though web push is deferred (see WEB_MIGRATION_PLAN.md §5)
+  fcmToken String?
+
+  // GDPR soft-deletion window
+  deletionRequestedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requirements         Requirement[]
+  quotesSent           Quote[]               @relation("QuoteSender")
+  quotesReceived       Quote[]               @relation("QuoteReceiver")
+  bookingsAsCustomer   Booking[]             @relation("BookingCustomer")
+  bookingsAsProvider   Booking[]             @relation("BookingProvider")
+  messagesSent         Message[]             @relation("MessageSender")
+  reviewsWritten       Review[]              @relation("ReviewAuthor")
+  reviewsReceived      Review[]              @relation("ReviewSubject")
+  notifications        Notification[]
+  disputesRaised       Dispute[]             @relation("DisputeRaiser")
+  portfolioItems       PortfolioItem[]
+  verificationRequests VerificationRequest[]
+  subscription         Subscription?
+  uploads              Upload[]
+  workingHours         WorkingHours[]
+  blockedDates         BlockedDate[]
+  profileViewsReceived ProfileView[]         @relation("ProfileViewSubject")
+  presence             Presence?
+  referralCode         Referral?
+  blocksMade           Block[]               @relation("Blocker")
+  blocksReceived       Block[]               @relation("Blocked")
+  reportsMade          Report[]              @relation("Reporter")
+  reportsAgainst       Report[]              @relation("Reported")
+  auditEvents          AuditEvent[]
+  notificationPrefs    NotificationPref?
+}
+
+// ─────────────────────────── Marketplace core ───────────────────────────
+
+model Requirement {
+  id           String  @id @default(cuid())
+  creatorId    String
+  title        String
+  category     String
+  description  String
+  skillsNeeded String? // comma-joined
+  minBudget    Float
+  maxBudget    Float
+  location     String?
+  status       String  @default("open") // open | in_progress | closed | cancelled
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator  User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  quotes   Quote[]
+  bookings Booking[]
+
+  @@index([creatorId])
+  @@index([status])
+  @@index([category])
+}
+
+model Quote {
+  id            String  @id @default(cuid())
+  requirementId String
+  senderId      String // provider bidding
+  receiverId    String // requirement owner
+  amount        Float
+  durationDays  Int
+  message       String?
+  status        String  @default("pending") // pending | shortlisted | accepted | rejected | countered | withdrawn
+
+  /// Set when this quote is a counter-offer to another quote.
+  counterOfQuoteId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  sender      User        @relation("QuoteSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver    User        @relation("QuoteReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  booking     Booking?
+
+  @@index([requirementId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+}
+
+model Booking {
+  id            String  @id @default(cuid())
+  quoteId       String? @unique
+  requirementId String?
+  customerId    String
+  providerId    String
+  amount        Float
+  status        String  @default("confirmed") // confirmed | in_progress | completed | cancelled | disputed
+
+  scheduledFor DateTime?
+  completedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quote       Quote?       @relation(fields: [quoteId], references: [id])
+  requirement Requirement? @relation(fields: [requirementId], references: [id])
+  customer    User         @relation("BookingCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  provider    User         @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  review      Review?
+  disputes    Dispute[]
+
+  @@index([customerId])
+  @@index([providerId])
+  @@index([status])
+}
+
+model Review {
+  id        String @id @default(cuid())
+  bookingId String @unique
+  authorId  String
+  subjectId String
+  rating    Int
+  comment   String?
+
+  /// Set by the fraud-detection view in the admin panel.
+  isFlagged Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  author  User    @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  subject User    @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([subjectId])
+}
+
+// ─────────────────────────── Messaging ───────────────────────────
+
+model Conversation {
+  id            String    @id @default(cuid())
+  /// Comma-joined participant uids, sorted — the lookup key for 1:1 threads.
+  participantIds String
+  lastMessageAt DateTime  @default(now())
+  lastMessageText String?
+
+  createdAt DateTime @default(now())
+
+  messages Message[]
+
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String  @id @default(cuid())
+  conversationId String
+  senderId       String
+  receiverId     String
+  text           String
+  attachmentUrl  String?
+  attachmentName String?
+  attachmentSize String?
+  quoteId        String?
+
+  read      Boolean @default(false)
+  isFlagged Boolean @default(false)
+  isDeleted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([isFlagged])
+}
+
+// ─────────────────────────── Trust & safety ───────────────────────────
+
+model Dispute {
+  id        String  @id @default(cuid())
+  bookingId String
+  raisedById String
+  reason    String
+  details   String
+  /// Comma-joined upload URLs.
+  evidenceUrls String?
+  status    String  @default("open") // open | under_review | resolved | rejected
+  resolution String?
+  resolvedById String?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  raisedBy User    @relation("DisputeRaiser", fields: [raisedById], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([bookingId])
+}
+
+model VerificationRequest {
+  id       String  @id @default(cuid())
+  userId   String
+  docType  String // aadhaar | pan | gst | license | other
+  /// Comma-joined upload URLs of the submitted documents.
+  docUrls  String
+  status   String  @default("pending") // pending | approved | rejected
+  reviewNote String?
+  reviewedById String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
+}
+
+model Report {
+  id           String  @id @default(cuid())
+  reporterId   String
+  reportedId   String
+  targetType   String // user | message | requirement | review
+  targetId     String?
+  reason       String
+  details      String?
+  status       String  @default("open") // open | resolved | dismissed
+  resolvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  reporter User @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("Reported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model Block {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+}
+
+// ─────────────────────────── Provider tooling ───────────────────────────
+
+model PortfolioItem {
+  id          String  @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  imageUrl    String?
+  projectUrl  String?
+  isFeatured  Boolean @default(false)
+  likeCount   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model WorkingHours {
+  id        String  @id @default(cuid())
+  userId    String
+  dayOfWeek Int // 0 = Sunday
+  startTime String // "09:00"
+  endTime   String // "17:00"
+  isEnabled Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayOfWeek])
+}
+
+model BlockedDate {
+  id     String   @id @default(cuid())
+  userId String
+  date   DateTime
+  reason String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  tier   String @default("free") // free | pro | elite
+  status String @default("active") // active | cancelled | past_due
+
+  razorpayOrderId        String?
+  razorpayPaymentId      String?
+  razorpaySubscriptionId String?
+
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────── Engagement ───────────────────────────
+
+model Notification {
+  id     String  @id @default(cuid())
+  userId String
+  type   String // quote_received | booking_confirmed | dispute_update | ...
+  title  String
+  body   String
+  /// JSON string of deep-link params (SQLite has no Json type).
+  data   String?
+  read   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
+
+model NotificationPref {
+  userId String  @id
+  push   Boolean @default(true)
+  email  Boolean @default(true)
+  quotes Boolean @default(true)
+  bookings Boolean @default(true)
+  messages Boolean @default(true)
+  marketing Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  userId       String @id
+  code         String @unique
+  referredById String?
+  signupCount  Int    @default(0)
+  rewardPoints Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProfileView {
+  id        String   @id @default(cuid())
+  subjectId String
+  viewerId  String?
+  createdAt DateTime @default(now())
+
+  subject User @relation("ProfileViewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([subjectId, createdAt])
+}
+
+model Presence {
+  userId        String   @id
+  isOnline      Boolean  @default(false)
+  lastHeartbeat DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────── Platform ───────────────────────────
+
+model Upload {
+  id          String  @id @default(cuid())
+  userId      String
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  context     String // avatar | portfolio | document | evidence
+  entityId    String?
+  storageKey  String
+  publicUrl   String?
+  confirmed   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuditEvent {
+  id       String  @id @default(cuid())
+  actorId  String?
+  action   String
+  target   String?
+  /// JSON string of contextual metadata.
+  metadata String?
+  ip       String?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+}
+
+model FeatureFlag {
+  key         String  @id
+  enabled     Boolean @default(false)
+  description String?
+
+  updatedAt DateTime @updatedAt
+}
+
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
