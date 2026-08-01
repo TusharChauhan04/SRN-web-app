@@ -33,6 +33,7 @@ import {
   toRequirement,
   toReview,
 } from "./mappers";
+import { listTokenMatch, searchTerm } from "./query";
 
 const CREATOR_SELECT = {
   select: { id: true, name: true, avatarUrl: true, role: true },
@@ -75,6 +76,7 @@ export class PrismaRequirementRepository implements RequirementRepository {
 
   async list(filter: ListRequirementsFilter = {}): Promise<Page<Requirement>> {
     const { limit, offset } = normalizePageParams(filter);
+    const query = searchTerm(filter.query);
     const where = {
       ...(filter.creatorId && { creatorId: filter.creatorId }),
       ...(filter.status && { status: filter.status }),
@@ -85,15 +87,19 @@ export class PrismaRequirementRepository implements RequirementRepository {
       ...(filter.maxBudget !== undefined && {
         minBudget: { lte: filter.maxBudget },
       }),
-      ...(filter.query && {
+      ...(query && {
         OR: [
-          { title: { contains: filter.query } },
-          { description: { contains: filter.query } },
-          { skillsNeeded: { contains: filter.query } },
+          { title: { contains: query } },
+          { description: { contains: query } },
+          { category: { contains: query } },
         ],
       }),
+      // Exact-token match per skill (see query.ts) — unanchored matching
+      // returned "javascript" requirements for a "java" filter.
       ...(filter.skills?.length && {
-        AND: filter.skills.map((s) => ({ skillsNeeded: { contains: s } })),
+        AND: filter.skills.map((s) => ({
+          skillsNeeded: { contains: listTokenMatch(s) },
+        })),
       }),
     };
 
@@ -126,11 +132,15 @@ export class PrismaRequirementRepository implements RequirementRepository {
     const skills = splitList(provider?.skills ?? null);
 
     // Match on any of the provider's skills; providers with no skills listed
-    // see the whole open feed rather than an empty one.
+    // see the whole open feed rather than an empty one. Exact-token match, or
+    // a provider listing "java" sees every "javascript" requirement in a feed
+    // the dashboard labels "Matched to your skills".
     const where = {
       status: "open",
       ...(skills.length > 0 && {
-        OR: skills.map((s) => ({ skillsNeeded: { contains: s } })),
+        OR: skills.map((s) => ({
+          skillsNeeded: { contains: listTokenMatch(s) },
+        })),
       }),
     };
 
@@ -391,10 +401,14 @@ export class PrismaBookingRepository implements BookingRepository {
     providerId: string,
     date: Date,
   ): Promise<Booking[]> {
+    // UTC day boundary, matching the availability code. These two methods
+    // answer the same question ("this provider's bookings on date D") and
+    // previously disagreed on any non-UTC server because this one used local
+    // setHours while getAvailableSlots used setUTCHours.
     const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
+    start.setUTCHours(0, 0, 0, 0);
     const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+    end.setUTCDate(end.getUTCDate() + 1);
 
     const rows = await prisma.booking.findMany({
       where: {
@@ -545,7 +559,14 @@ export class PrismaReviewRepository implements ReviewRepository {
     // signal for bought ratings available in this schema.
     const rows = await prisma.review.findMany({
       where: {
-        OR: [{ isFlagged: true }, { rating: 5, comment: null }],
+        OR: [
+          { isFlagged: true },
+          // Empty-string comments count too: `create` stores `comment ?? null`,
+          // so a review submitted with "" is saved as "" and was invisible to
+          // a NULL-only check — exactly the shape a bought-review script makes.
+          { rating: 5, comment: null },
+          { rating: 5, comment: "" },
+        ],
       },
       include: REVIEW_INCLUDE,
       orderBy: { createdAt: "desc" },

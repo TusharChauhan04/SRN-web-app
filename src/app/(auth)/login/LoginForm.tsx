@@ -15,8 +15,14 @@ import {
 type Mode = "signin" | "signup";
 
 export function LoginForm() {
-  const { signInWithGoogle, signInWithEmail, signUpWithEmail, busy, error } =
-    useAuth();
+  const {
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    busy,
+    error,
+    notice,
+  } = useAuth();
   const [mode, setMode] = useState<Mode>("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -63,6 +69,12 @@ export function LoginForm() {
         {error ? (
           <div className="mb-4">
             <Alert>{error}</Alert>
+          </div>
+        ) : null}
+
+        {notice ? (
+          <div className="mb-4">
+            <Alert tone="info">{notice}</Alert>
           </div>
         ) : null}
 

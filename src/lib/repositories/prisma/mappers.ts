@@ -20,6 +20,7 @@ import type {
   NotificationPrefs,
   PortfolioItem,
   Presence,
+  PublicUser,
   Quote,
   QuoteStatus,
   Referral,
@@ -47,12 +48,21 @@ export function splitList(value: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-/** string[] → comma-joined column. Empty array yields null, not "". */
+/**
+ * string[] → comma-DELIMITED column, e.g. ["react","node"] → ",react,node,".
+ *
+ * The leading and trailing commas are load-bearing: they let a query match a
+ * whole token with `contains: ",react,"`. Without them an unanchored LIKE
+ * matched across token boundaries, so searching "java" returned providers who
+ * had only listed "javascript". Empty array yields null, not "".
+ */
 export function joinList(
   value: string[] | null | undefined,
 ): string | null {
   if (!value || value.length === 0) return null;
-  return value.map((s) => s.trim()).filter(Boolean).join(",");
+  const items = value.map((s) => s.trim()).filter(Boolean);
+  if (items.length === 0) return null;
+  return `,${items.join(",")},`;
 }
 
 /**
@@ -119,6 +129,57 @@ export function toUser(row: Row): User {
     deletionRequestedAt: (row.deletionRequestedAt as Date | null) ?? null,
     createdAt: row.createdAt as Date,
     updatedAt: row.updatedAt as Date,
+  };
+}
+
+/** Columns safe to expose on public discovery surfaces. Pair with toPublicUser. */
+export const PUBLIC_USER_SELECT = {
+  id: true,
+  name: true,
+  role: true,
+  title: true,
+  bio: true,
+  location: true,
+  avatarUrl: true,
+  skills: true,
+  portfolioLinks: true,
+  hourlyRate: true,
+  rating: true,
+  reviewsCount: true,
+  completedGigs: true,
+  onTimeRate: true,
+  isVerified: true,
+  isPremium: true,
+  isAvailable: true,
+  serviceRadiusKm: true,
+  companyName: true,
+  industry: true,
+  createdAt: true,
+} as const;
+
+export function toPublicUser(row: Row): PublicUser {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    role: row.role as UserRole,
+    title: (row.title as string | null) ?? null,
+    bio: (row.bio as string | null) ?? null,
+    location: (row.location as string | null) ?? null,
+    avatarUrl: (row.avatarUrl as string | null) ?? null,
+    skills: splitList(row.skills as string | null),
+    portfolioLinks: splitList(row.portfolioLinks as string | null),
+    hourlyRate: (row.hourlyRate as number | null) ?? null,
+    rating: (row.rating as number | null) ?? 0,
+    reviewsCount: (row.reviewsCount as number) ?? 0,
+    completedGigs: (row.completedGigs as number) ?? 0,
+    onTimeRate: (row.onTimeRate as number | null) ?? null,
+    isVerified: Boolean(row.isVerified),
+    isPremium: Boolean(row.isPremium),
+    isAvailable: Boolean(row.isAvailable),
+    serviceRadiusKm: (row.serviceRadiusKm as number | null) ?? null,
+    companyName: (row.companyName as string | null) ?? null,
+    industry: (row.industry as string | null) ?? null,
+    createdAt: row.createdAt as Date,
   };
 }
 
@@ -487,9 +548,12 @@ export function toReport(row: Row): Report {
 }
 
 /**
- * Canonical participant key for a 1:1 conversation. Sorting makes the pair
- * order-independent so (a,b) and (b,a) resolve to the same thread.
+ * Canonical participant key for a 1:1 conversation, e.g. ",alice,bob,".
+ *
+ * Sorting makes the pair order-independent so (a,b) and (b,a) resolve to the
+ * same thread. The surrounding commas let a lookup anchor on ",uid," instead
+ * of an unanchored substring match.
  */
 export function conversationKey(a: string, b: string): string {
-  return [a, b].sort().join(",");
+  return `,${[a, b].sort().join(",")},`;
 }

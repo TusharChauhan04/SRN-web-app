@@ -36,10 +36,25 @@ export class PrismaDisputeRepository implements DisputeRepository {
     });
     if (!booking) throw new Error("Booking not found");
 
-    // Remember where the booking was so resolve() can put it back. Guard
-    // against a second dispute overwriting this with "disputed" itself.
-    const previousBookingStatus =
-      booking.status === "disputed" ? null : booking.status;
+    // Remember where the booking was so resolve() can put it back.
+    //
+    // If the booking is already disputed, inherit the prior status from the
+    // existing open dispute rather than storing null — storing null made
+    // resolve() fall back to "completed", which is the exact outcome this
+    // column exists to prevent (a cancelled booking resolving to completed).
+    let previousBookingStatus: string | null = booking.status;
+    if (booking.status === "disputed") {
+      const openDispute = await prisma.dispute.findFirst({
+        where: {
+          bookingId: input.bookingId,
+          status: { in: ["open", "under_review"] },
+          previousBookingStatus: { not: null },
+        },
+        select: { previousBookingStatus: true },
+        orderBy: { createdAt: "asc" },
+      });
+      previousBookingStatus = openDispute?.previousBookingStatus ?? null;
+    }
 
     const [row] = await prisma.$transaction([
       prisma.dispute.create({
@@ -122,23 +137,37 @@ export class PrismaDisputeRepository implements DisputeRepository {
       throw new Error("Dispute is already closed");
     }
 
+    // Only un-dispute the booking once NO other dispute on it is still open.
+    // Closing one of two open disputes used to clear the disputed status while
+    // the other was still awaiting review.
+    const otherOpen = await prisma.dispute.count({
+      where: {
+        bookingId: existing.bookingId,
+        id: { not: id },
+        status: { in: ["open", "under_review"] },
+      },
+    });
+
     // Restore the booking to where it was before the dispute. Falling back to
-    // "completed" only when the prior status is unknown — marking a cancelled
-    // or still-in-progress booking "completed" is what the old code did, and it
-    // was wrong in both directions.
+    // "completed" only when the prior status is genuinely unknown.
     const restoredStatus = existing.previousBookingStatus ?? "completed";
 
-    const [row] = await prisma.$transaction([
-      prisma.dispute.update({
-        where: { id },
-        data: { status, resolution, resolvedById, resolvedAt: new Date() },
-        include: DISPUTE_INCLUDE,
-      }),
-      prisma.booking.update({
-        where: { id: existing.bookingId },
-        data: { status: restoredStatus },
-      }),
-    ]);
+    const updateDispute = prisma.dispute.update({
+      where: { id },
+      data: { status, resolution, resolvedById, resolvedAt: new Date() },
+      include: DISPUTE_INCLUDE,
+    });
+
+    const [row] =
+      otherOpen > 0
+        ? [await updateDispute]
+        : await prisma.$transaction([
+            updateDispute,
+            prisma.booking.update({
+              where: { id: existing.bookingId },
+              data: { status: restoredStatus },
+            }),
+          ]);
 
     return toDispute(row);
   }
@@ -217,9 +246,12 @@ export class PrismaVerificationRepository implements VerificationRepository {
   ): Promise<VerificationRequest> {
     const existing = await prisma.verificationRequest.findUnique({
       where: { id },
-      select: { userId: true },
+      select: { userId: true, status: true },
     });
     if (!existing) throw new Error("Verification request not found");
+    if (existing.status !== "pending") {
+      throw new Error(`Verification request is already ${existing.status}`);
+    }
 
     // Approval is what actually grants the verified badge, so the two writes
     // must land together — a half-applied approval leaves an approved request
@@ -249,16 +281,35 @@ export class PrismaVerificationRepository implements VerificationRepository {
     reviewedById: string,
     note: string,
   ): Promise<VerificationRequest> {
-    const row = await prisma.verificationRequest.update({
+    const existing = await prisma.verificationRequest.findUnique({
       where: { id },
-      data: {
-        status: "rejected",
-        reviewedById,
-        reviewNote: note,
-        reviewedAt: new Date(),
-      },
-      include: VERIFICATION_INCLUDE,
+      select: { userId: true, status: true },
     });
+    if (!existing) throw new Error("Verification request not found");
+    if (existing.status === "rejected") {
+      throw new Error("Verification request is already rejected");
+    }
+
+    // Rejecting must also REVOKE the badge. Previously reject() only wrote the
+    // request row, so an approve-then-reject left the user permanently
+    // verified while the audit trail read "rejected".
+    const [row] = await prisma.$transaction([
+      prisma.verificationRequest.update({
+        where: { id },
+        data: {
+          status: "rejected",
+          reviewedById,
+          reviewNote: note,
+          reviewedAt: new Date(),
+        },
+        include: VERIFICATION_INCLUDE,
+      }),
+      prisma.user.update({
+        where: { id: existing.userId },
+        data: { isVerified: false },
+      }),
+    ]);
+
     return toVerificationRequest(row);
   }
 

@@ -12,21 +12,22 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import * as Icons from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { isActive, navForRole } from "@/lib/nav/config";
+import { activeHref, navForRole, type IconName } from "@/lib/nav/config";
 import { ROLE_COLORS, ROLE_LABELS, type User } from "@/lib/repositories/types";
 import { Avatar, Button, cn } from "@/components/ui";
 
-function Icon({ name, className }: { name: string; className?: string }) {
-  const Cmp = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[
-    name
-  ];
-  if (!Cmp) return null;
+function Icon({ name, className }: { name: IconName; className?: string }) {
+  // `name` is `keyof typeof Icons`, so a typo in nav/config.ts is a type error
+  // rather than a silently missing icon.
+  const Cmp = Icons[name] as React.ComponentType<{ className?: string }>;
   return <Cmp className={className} />;
 }
 
 function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void }) {
   const pathname = usePathname();
   const sections = navForRole(user.role);
+  // Resolved once across the whole nav so exactly one item is marked current.
+  const current = activeHref(pathname, sections);
 
   return (
     <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
@@ -39,7 +40,7 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
           ) : null}
           <ul className="space-y-1">
             {section.items.map((item) => {
-              const active = isActive(pathname, item);
+              const active = item.href === current;
               return (
                 <li key={item.href}>
                   <Link

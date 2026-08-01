@@ -31,12 +31,44 @@ export const SUBSCRIPTION_PRICES: Record<SubscriptionTier, number> = {
   elite: 149900, // ₹1499
 };
 
-/** Normalises a date to UTC midnight so blocked-date lookups are exact. */
-function startOfDay(date: Date): Date {
+/**
+ * Normalises a date to UTC midnight so blocked-date lookups are exact.
+ *
+ * IMPORTANT CONTRACT: every date the availability code touches is interpreted
+ * in UTC, and `WorkingHours.startTime`/`endTime` are wall-clock times in the
+ * SAME frame. Mixing the two frames is what previously caused availability to
+ * be computed for the wrong weekday and to never detect an already-booked
+ * hour, so callers must not pass a local-midnight Date.
+ *
+ * KNOWN LIMITATION: there is no per-provider timezone column, so "wall clock"
+ * is effectively UTC for everyone. A provider in IST setting 09:00-18:00 is
+ * really offering 14:30-23:30 local. Fixing this properly needs a `timezone`
+ * field on User and conversion at the boundary — tracked in
+ * WEB_MIGRATION_PLAN.md, not silently ignored.
+ */
+export function startOfDay(date: Date): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
   return d;
 }
+
+/** "09:30" → 570. Returns null for malformed input rather than NaN. */
+function parseClockMinutes(value: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function formatClock(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+const SLOT_MINUTES = 60;
 
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -212,23 +244,39 @@ export class PrismaAvailabilityRepository implements AvailabilityRepository {
 
     if (blocked || !hours) return [];
 
-    // Hourly slots across the working window, minus hours already booked.
-    const bookedHours = new Set(
+    const startMinutes = parseClockMinutes(hours.startTime);
+    const endMinutes = parseClockMinutes(hours.endTime);
+    // Malformed hours are a data problem, not "fully booked" — surface it
+    // rather than silently reporting no availability.
+    if (startMinutes === null || endMinutes === null) {
+      throw new Error(
+        `Invalid working hours for provider ${providerId}: ${hours.startTime}-${hours.endTime}`,
+      );
+    }
+    if (endMinutes <= startMinutes) return [];
+
+    // Booked minutes-from-midnight in the SAME UTC frame as the working hours,
+    // so a booking actually collides with the slot it occupies. Comparing
+    // getUTCHours() against locally-written "09:00" strings meant nothing ever
+    // matched and every booked slot was offered again.
+    const bookedMinutes = new Set(
       bookings
-        .map((b) => b.scheduledFor?.getUTCHours())
-        .filter((h): h is number => h !== undefined),
+        .map((b) =>
+          b.scheduledFor
+            ? b.scheduledFor.getUTCHours() * 60 + b.scheduledFor.getUTCMinutes()
+            : null,
+        )
+        .filter((m): m is number => m !== null),
     );
 
-    const startHour = Number(hours.startTime.split(":")[0]);
-    const endHour = Number(hours.endTime.split(":")[0]);
     const slots: { start: string; end: string }[] = [];
-
-    for (let h = startHour; h < endHour; h++) {
-      if (bookedHours.has(h)) continue;
-      slots.push({
-        start: `${String(h).padStart(2, "0")}:00`,
-        end: `${String(h + 1).padStart(2, "0")}:00`,
-      });
+    for (let m = startMinutes; m + SLOT_MINUTES <= endMinutes; m += SLOT_MINUTES) {
+      // A booking anywhere inside the slot consumes it.
+      const taken = [...bookedMinutes].some(
+        (b) => b >= m && b < m + SLOT_MINUTES,
+      );
+      if (taken) continue;
+      slots.push({ start: formatClock(m), end: formatClock(m + SLOT_MINUTES) });
     }
 
     return slots;
@@ -248,12 +296,18 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
     tier: SubscriptionTier,
     razorpayOrderId: string,
   ): Promise<Subscription> {
-    // The pending order is recorded but the tier is NOT granted here — only the
-    // verified webhook may do that. See activateFromPayment.
+    // Record WHICH tier this checkout is for, on `pendingTier`. Two bugs are
+    // being avoided here:
+    //   - the requested tier used to be discarded entirely, so activation
+    //     granted whatever was already there — a user could pay for elite and
+    //     receive nothing;
+    //   - `status` used to be set to "pending", which downgraded a live
+    //     subscriber the moment they opened the upgrade page.
+    // Neither `tier` nor `status` is touched: only the verified webhook grants.
     const row = await prisma.subscription.upsert({
       where: { userId },
-      create: { userId, tier: "free", status: "pending", razorpayOrderId },
-      update: { status: "pending", razorpayOrderId },
+      create: { userId, pendingTier: tier, razorpayOrderId },
+      update: { pendingTier: tier, razorpayOrderId },
     });
     return toSubscription(row);
   }
@@ -270,12 +324,19 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
       throw new Error(`No subscription found for order ${razorpayOrderId}`);
     }
 
+    // Grant the tier that was actually paid for. Falling back to the existing
+    // tier only if no pending tier was recorded.
+    const grantedTier = (existing.pendingTier ??
+      existing.tier) as SubscriptionTier;
+
     // Money path: the subscription row and the user's premium flag must land
     // together, or a paid user can be left without the entitlement they bought.
     const [row] = await prisma.$transaction([
       prisma.subscription.update({
         where: { id: existing.id },
         data: {
+          tier: grantedTier,
+          pendingTier: null,
           status: "active",
           razorpayPaymentId,
           currentPeriodEnd: periodEnd,
@@ -284,7 +345,7 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
       }),
       prisma.user.update({
         where: { id: existing.userId },
-        data: { isPremium: existing.tier !== "free" },
+        data: { isPremium: grantedTier !== "free" },
       }),
     ]);
 
@@ -335,7 +396,11 @@ export class PrismaAnalyticsRepository implements AnalyticsRepository {
     providerId: string,
     days = 30,
   ): Promise<ProviderAnalytics> {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    // Anchor to a day boundary and include today. Previously `since` was an
+    // arbitrary time-of-day and the bucket loop stopped at yesterday, so
+    // today's rows were counted in the headline number but silently dropped
+    // from the series — the chart and the total permanently disagreed.
+    const since = startOfDay(new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000));
 
     const [views, viewRows, quotesSent, quotesAccepted, completed, earnings, user] =
       await Promise.all([
@@ -392,7 +457,9 @@ export class PrismaAnalyticsRepository implements AnalyticsRepository {
   async growthSeries(days: number): Promise<
     { date: string; users: number; requirements: number; bookings: number }[]
   > {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    // Same off-by-one fix as providerAnalytics: anchor to a day boundary and
+    // include today, or today's signups vanish from the admin growth chart.
+    const since = startOfDay(new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000));
 
     const [users, requirements, bookings] = await Promise.all([
       prisma.user.findMany({

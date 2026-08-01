@@ -49,24 +49,40 @@ export default async function DashboardPage() {
 // ─────────────── Business / customer (posts requirements) ───────────────
 
 async function SeekerDashboard({ user }: { user: User }) {
-  const [requirements, bookings, quotes, unreadMessages] = await Promise.all([
+  const [
+    requirements,
+    bookings,
+    quotes,
+    unreadMessages,
+    openRequirementsPage,
+    confirmedPage,
+    inProgressPage,
+  ] = await Promise.all([
     repo.requirements.list({ creatorId: user.id, limit: 5 }),
     repo.bookings.list({ customerId: user.id, limit: 5 }),
     repo.quotes.list({ receiverId: user.id, status: "pending", limit: 5 }),
     repo.messages.countUnread(user.id),
+    // Headline stats need counts over ALL rows, not the 5-row page. Deriving
+    // them by filtering `items` capped every stat at 5 — and read 0 whenever
+    // the 5 most recent rows happened to be closed.
+    repo.requirements.list({ creatorId: user.id, status: "open", limit: 1 }),
+    repo.bookings.list({ customerId: user.id, status: "confirmed", limit: 1 }),
+    repo.bookings.list({
+      customerId: user.id,
+      status: "in_progress",
+      limit: 1,
+    }),
   ]);
 
   // `Page.total` is optional by design — cursor-only stores can't supply it.
   // Fall back to the loaded page length so these counters never render blank.
   const requirementCount = requirements.total ?? requirements.items.length;
   const pendingQuoteCount = quotes.total ?? quotes.items.length;
-
-  const openRequirements = requirements.items.filter(
-    (r) => r.status === "open",
-  ).length;
-  const activeBookings = bookings.items.filter(
-    (b) => b.status === "confirmed" || b.status === "in_progress",
-  ).length;
+  const openRequirements =
+    openRequirementsPage.total ?? openRequirementsPage.items.length;
+  const activeBookings =
+    (confirmedPage.total ?? confirmedPage.items.length) +
+    (inProgressPage.total ?? inProgressPage.items.length);
 
   return (
     <>

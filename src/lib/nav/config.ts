@@ -11,13 +11,22 @@
  * so the "shared modal screens" mobile hid behind navigation get promoted to
  * visible secondary nav.
  */
+import type * as Icons from "lucide-react";
 import type { UserRole } from "@/lib/repositories/types";
+
+/**
+ * Names that actually exist in lucide-react.
+ *
+ * Typed rather than `string` so a typo — or an alias being dropped in a future
+ * lucide release — is a build error instead of a silently invisible icon.
+ */
+export type IconName = keyof typeof Icons;
 
 export interface NavItem {
   label: string;
   href: string;
   /** Lucide icon name, resolved in the Sidebar component. */
-  icon: string;
+  icon: IconName;
   /** Marks the item active for any nested route under `href`. */
   matchPrefix?: boolean;
 }
@@ -73,7 +82,7 @@ const NAV_BY_ROLE: Record<UserRole, NavSection[]> = {
         {
           label: "Post requirement",
           href: "/requirements/new",
-          icon: "PlusCircle",
+          icon: "CirclePlus",
         },
         {
           label: "My requirements",
@@ -94,12 +103,12 @@ const NAV_BY_ROLE: Record<UserRole, NavSection[]> = {
   customer: [
     {
       items: [
-        { label: "Home", href: "/dashboard", icon: "Home" },
+        { label: "Home", href: "/dashboard", icon: "House" },
         { label: "Discover", href: "/search", icon: "Search" },
         {
           label: "Post requirement",
           href: "/requirements/new",
-          icon: "PlusCircle",
+          icon: "CirclePlus",
         },
         {
           label: "Bookings",
@@ -187,7 +196,7 @@ const NAV_BY_ROLE: Record<UserRole, NavSection[]> = {
       title: "Platform",
       items: [
         { label: "Revenue", href: "/admin/revenue", icon: "IndianRupee" },
-        { label: "Fraud", href: "/admin/fraud", icon: "AlertTriangle" },
+        { label: "Fraud", href: "/admin/fraud", icon: "TriangleAlert" },
         { label: "Feature flags", href: "/admin/flags", icon: "ToggleLeft" },
         { label: "Audit log", href: "/admin/audit", icon: "ScrollText" },
       ],
@@ -208,10 +217,28 @@ export function homeForRole(role: UserRole): string {
   return role === "admin" ? "/admin" : "/dashboard";
 }
 
-export function isActive(pathname: string, item: NavItem): boolean {
-  if (item.matchPrefix) {
-    // Guard against /admin matching /admin/users as a prefix collision.
-    return pathname === item.href || pathname.startsWith(`${item.href}/`);
+/**
+ * Marks exactly one nav item active for a given path.
+ *
+ * A plain per-item check lit up two items at once on /requirements/new — the
+ * exact match on "Post requirement" and the prefix match on "My requirements".
+ * That renders two `aria-current="page"` elements, which is invalid and makes
+ * a screen reader announce two current pages. Resolving against the whole nav
+ * and preferring the LONGEST matching href fixes it structurally, so future
+ * nested routes can't reintroduce it.
+ */
+export function activeHref(pathname: string, sections: NavSection[]): string | null {
+  let best: string | null = null;
+
+  for (const section of sections) {
+    for (const item of section.items) {
+      const matches = item.matchPrefix
+        ? pathname === item.href || pathname.startsWith(`${item.href}/`)
+        : pathname === item.href;
+      if (!matches) continue;
+      if (best === null || item.href.length > best.length) best = item.href;
+    }
   }
-  return pathname === item.href;
+
+  return best;
 }

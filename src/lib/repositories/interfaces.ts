@@ -26,6 +26,7 @@ import type {
   PageParams,
   PortfolioItem,
   Presence,
+  PublicUser,
   Quote,
   QuoteStatus,
   Referral,
@@ -95,7 +96,8 @@ export interface UserRepository {
   findByEmail(email: string): Promise<User | null>;
   update(id: string, input: UpdateUserInput): Promise<User>;
   list(filter?: ListUsersFilter): Promise<Page<User>>;
-  searchProviders(filter: SearchProvidersFilter): Promise<Page<User>>;
+  /** Public discovery — returns a PII-free projection, never full User rows. */
+  searchProviders(filter: SearchProvidersFilter): Promise<Page<PublicUser>>;
 
   // Admin operations — /admin/users/:id/*
   setSuspended(id: string, suspended: boolean): Promise<User>;
@@ -105,8 +107,18 @@ export interface UserRepository {
   // GDPR — /gdpr/account
   markForDeletion(id: string, at: Date): Promise<User>;
   cancelDeletion(id: string): Promise<User>;
-  /** Strips PII in place, keeping the row for referential integrity. */
+  /**
+   * Strips PII in place across the user row AND every related row that carries
+   * identity (KYC docs, message text, dispute evidence, uploads), keeping the
+   * User row for referential integrity.
+   *
+   * NOT sufficient on its own: call `listStorageKeys` first and delete those
+   * objects from storage, and delete the Firebase Auth user separately. Neither
+   * lives in this database.
+   */
   anonymize(id: string): Promise<void>;
+  /** Storage keys to delete from object storage before `anonymize`. */
+  listStorageKeys(id: string): Promise<string[]>;
   /** Every row belonging to this user, for the GDPR export bundle. */
   exportAll(id: string): Promise<Record<string, unknown>>;
 

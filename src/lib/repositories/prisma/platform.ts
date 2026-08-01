@@ -165,31 +165,38 @@ export class PrismaReferralRepository implements ReferralRepository {
       throw new Error("Cannot apply your own referral code");
     }
 
-    // Ensure the new user has a referral row, and record who referred them.
-    await this.getOrCreateCode(newUserId);
-    const alreadyReferred = await prisma.referral.findUnique({
-      where: { userId: newUserId },
-      select: { referredById: true },
-    });
-    if (alreadyReferred?.referredById) {
-      throw new Error("A referral code has already been applied");
+    // Reciprocal farming guard: two throwaway accounts applying each other's
+    // codes used to mint points with no third party involved.
+    if (owner.referredById === newUserId) {
+      throw new Error("Reciprocal referrals are not allowed");
     }
 
-    const [, updatedOwner] = await prisma.$transaction([
-      prisma.referral.update({
-        where: { userId: newUserId },
+    // Ensure the new user has a referral row before the transaction claims it.
+    await this.getOrCreateCode(newUserId);
+
+    // Interactive transaction: the read of `referredById` and the write that
+    // sets it must not be separated, or two concurrent submissions both see
+    // null and the owner is credited twice for one referred user.
+    return prisma.$transaction(async (tx) => {
+      const claim = await tx.referral.updateMany({
+        // Conditional update IS the check — only succeeds while still unset.
+        where: { userId: newUserId, referredById: null },
         data: { referredById: owner.userId },
-      }),
-      prisma.referral.update({
+      });
+      if (claim.count === 0) {
+        throw new Error("A referral code has already been applied");
+      }
+
+      const updatedOwner = await tx.referral.update({
         where: { userId: owner.userId },
         data: {
           signupCount: { increment: 1 },
           rewardPoints: { increment: 100 },
         },
-      }),
-    ]);
+      });
 
-    return toReferral(updatedOwner);
+      return toReferral(updatedOwner);
+    });
   }
 
   async stats(
@@ -384,34 +391,71 @@ export class PrismaFeatureFlagRepository implements FeatureFlagRepository {
 // ─────────────────────────── Rate limiting ───────────────────────────
 
 export class PrismaRateLimitRepository implements RateLimitRepository {
+  /**
+   * Single atomic upsert. `allowed` is derived from the count the database
+   * actually wrote, on BOTH the rollover and increment paths.
+   *
+   * The previous read-then-branch version returned a hardcoded
+   * `allowed: true` whenever the window had expired, so N concurrent requests
+   * at window rollover all passed — an attacker could burst, wait one window,
+   * and burst again without limit.
+   *
+   * This is deliberately raw, dialect-specific SQL. It lives in the Prisma
+   * implementation directory where that is allowed, but it IS one of the few
+   * places a database swap has to rewrite rather than re-point. Noted in
+   * DATABASE.md.
+   */
   async hit(
     key: string,
     limit: number,
     windowMs: number,
   ): Promise<{ allowed: boolean; remaining: number; resetAt: Date }> {
-    const now = new Date();
-    const existing = await prisma.rateLimit.findUnique({ where: { key } });
+    const nowMs = Date.now();
+    const resetMs = nowMs + windowMs;
 
-    // Expired or absent window → start a fresh one.
-    if (!existing || existing.expiresAt <= now) {
-      const resetAt = new Date(now.getTime() + windowMs);
-      await prisma.rateLimit.upsert({
-        where: { key },
-        create: { key, count: 1, expiresAt: resetAt },
-        update: { count: 1, expiresAt: resetAt },
-      });
-      return { allowed: true, remaining: limit - 1, resetAt };
+    // Prisma stores SQLite DateTime as INTEGER unix-ms, so bind numbers.
+    const rows = await prisma.$queryRaw<
+      { count: number; expiresAt: number }[]
+    >`
+      INSERT INTO "RateLimit" ("key", "count", "expiresAt")
+      VALUES (${key}, 1, ${resetMs})
+      ON CONFLICT("key") DO UPDATE SET
+        "count" = CASE
+          WHEN "RateLimit"."expiresAt" <= ${nowMs} THEN 1
+          ELSE "RateLimit"."count" + 1
+        END,
+        "expiresAt" = CASE
+          WHEN "RateLimit"."expiresAt" <= ${nowMs} THEN ${resetMs}
+          ELSE "RateLimit"."expiresAt"
+        END
+      RETURNING "count", "expiresAt"
+    `;
+
+    const row = rows[0];
+    if (!row) {
+      // Should be unreachable — RETURNING always yields a row here. Fail
+      // closed rather than silently granting unlimited access.
+      return { allowed: false, remaining: 0, resetAt: new Date(resetMs) };
     }
 
-    const updated = await prisma.rateLimit.update({
-      where: { key },
-      data: { count: { increment: 1 } },
-    });
+    const count = Number(row.count);
+    const resetAt = new Date(Number(row.expiresAt));
+
+    // Opportunistic sweep of expired rows. The key is caller-derived and
+    // partly client-influenced, so without this the table grows unbounded.
+    // Probabilistic to avoid needing a scheduler.
+    if (Math.random() < 0.01) {
+      void prisma.rateLimit
+        .deleteMany({ where: { expiresAt: { lt: new Date(nowMs) } } })
+        .catch(() => {
+          // Housekeeping only — never fail the request it piggybacks on.
+        });
+    }
 
     return {
-      allowed: updated.count <= limit,
-      remaining: Math.max(0, limit - updated.count),
-      resetAt: updated.expiresAt,
+      allowed: count <= limit,
+      remaining: Math.max(0, limit - count),
+      resetAt,
     };
   }
 }

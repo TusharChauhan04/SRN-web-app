@@ -4,18 +4,14 @@ import { useActionState, useState } from "react";
 import {
   ROLE_COLORS,
   ROLE_LABELS,
-  type UserRole,
+  SELF_SELECTABLE_ROLES,
+  type SelfSelectableRole,
 } from "@/lib/repositories/types";
 import { Alert, Button, Card, Field, Input, Spinner } from "@/components/ui";
 import { completeOnboarding, type OnboardingState } from "./actions";
 
-/** Admin is granted, not self-selected — so it isn't offered here. */
-const SELECTABLE_ROLES: UserRole[] = [
-  "business",
-  "customer",
-  "digital",
-  "local",
-];
+// Single source of truth, shared with the Server Action that validates it —
+// the two used to state the same rule separately and could drift apart.
 
 const ROLE_BLURB: Record<string, string> = {
   business: "Post requirements and hire providers for your company.",
@@ -29,7 +25,7 @@ export function OnboardingForm({ email }: { email: string }) {
     completeOnboarding,
     {},
   );
-  const [role, setRole] = useState<UserRole>("customer");
+  const [role, setRole] = useState<SelfSelectableRole>("customer");
 
   const isProvider = role === "digital" || role === "local";
   const isBusiness = role === "business";
@@ -50,7 +46,7 @@ export function OnboardingForm({ email }: { email: string }) {
 
         <fieldset className="space-y-3">
           <legend className="mb-3 text-sm font-medium">I want to…</legend>
-          {SELECTABLE_ROLES.map((r) => {
+          {SELF_SELECTABLE_ROLES.map((r) => {
             const selected = role === r;
             return (
               <button

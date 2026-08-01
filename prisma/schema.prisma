@@ -202,7 +202,10 @@ model Review {
 model Conversation {
   id            String    @id @default(cuid())
   /// Comma-joined participant uids, sorted — the lookup key for 1:1 threads.
-  participantIds String
+  /// Unique: without it, two simultaneous messages in opposite directions
+  /// create duplicate threads that can never be merged. Also gives the lookup
+  /// an index instead of a leading-wildcard table scan.
+  participantIds String    @unique
   lastMessageAt DateTime  @default(now())
   lastMessageText String?
 
@@ -363,8 +366,14 @@ model BlockedDate {
 model Subscription {
   id     String @id @default(cuid())
   userId String @unique
+  /// The tier the user currently HAS. Only the verified webhook may change it.
   tier   String @default("free") // free | pro | elite
   status String @default("active") // active | cancelled | past_due
+
+  /// The tier a pending checkout is for. Kept separate from `tier` so opening
+  /// or abandoning a checkout can never downgrade a live subscription, and so
+  /// activation knows what was actually paid for.
+  pendingTier String?
 
   razorpayOrderId        String?
   razorpayPaymentId      String?

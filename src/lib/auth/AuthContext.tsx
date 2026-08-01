@@ -25,6 +25,7 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   signInWithPopup,
   signOut as firebaseSignOut,
   updateProfile,
@@ -37,6 +38,8 @@ interface AuthContextValue {
   user: User | null;
   busy: boolean;
   error: string | null;
+  /** Non-error feedback, e.g. "verification email sent". */
+  notice: string | null;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (
@@ -90,9 +93,13 @@ export function AuthProvider({
   initialUser: User | null;
 }) {
   const router = useRouter();
-  const [user] = useState<User | null>(initialUser);
+  // Read the prop directly rather than seeding state from it. `router.refresh()`
+  // re-renders the server layout with a fresh profile while this provider stays
+  // mounted, so a useState copy would serve the value from first paint forever.
+  const user = initialUser;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * Exchanges the Firebase ID token for the server session cookie. Every
@@ -126,6 +133,9 @@ export function AuthProvider({
         const message = friendlyError(err);
         // Empty message means the user cancelled — not worth surfacing.
         if (message) setError(message);
+      } finally {
+        // Must reset on success too. Clearing it only in `catch` left the
+        // button permanently disabled on any path that doesn't navigate away.
         setBusy(false);
       }
     },
@@ -168,23 +178,47 @@ export function AuthProvider({
         );
         // Carry the name through so onboarding can prefill it.
         await updateProfile(credential.user, { displayName: name });
-        await establishSession(await credential.user.getIdToken());
+
+        // The session endpoint rejects unverified password sign-ups, so send
+        // the verification mail and stop here rather than bouncing off a 403.
+        await sendEmailVerification(credential.user);
+        await firebaseSignOut(auth).catch(() => {});
+
+        setNotice(
+          `We've sent a verification link to ${email}. Confirm it, then sign in.`,
+        );
       }),
-    [run, establishSession],
+    [run],
   );
 
   const signOut = useCallback(async () => {
     setBusy(true);
+    setError(null);
     try {
       // Clear the server cookie first: if the page reloads mid-sign-out, the
       // server must not still consider the session valid.
-      await fetch("/api/auth/session", { method: "DELETE" });
+      const res = await fetch("/api/auth/session", { method: "DELETE" });
+      if (!res.ok) {
+        // The server could not revoke the session. Say so rather than
+        // pretending — this is the action users take when they think their
+        // account is compromised.
+        throw new Error(
+          "We couldn't fully sign you out. Check your connection and try again.",
+        );
+      }
+
       await firebaseSignOut(getFirebaseAuth()).catch(() => {
-        // Firebase may already consider us signed out; the cookie is gone,
-        // which is what actually matters.
+        // Firebase may already consider us signed out; the server cookie is
+        // revoked, which is what actually matters.
       });
       router.replace("/login");
       router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We couldn't sign you out. Try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -195,13 +229,23 @@ export function AuthProvider({
       user,
       busy,
       error,
+      notice,
       signInWithGoogle,
       signInWithEmail,
       signUpWithEmail,
       signOut,
       clearError: () => setError(null),
     }),
-    [user, busy, error, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut],
+    [
+      user,
+      busy,
+      error,
+      notice,
+      signInWithGoogle,
+      signInWithEmail,
+      signUpWithEmail,
+      signOut,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

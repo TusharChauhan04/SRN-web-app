@@ -403,18 +403,22 @@ Two separate gaps, do not conflate them.
 `database-reviewer`, `test-executor`, `ux-reviewer`, `accessibility-reviewer`,
 `release-auditor`, `/full-review-pipeline`.
 
-**Agents that exist but failed to complete** — hit an API session limit
-mid-run on 2026-08-01: `security-reviewer`, `code-reviewer`,
-`risk-classifier`. These need re-running.
+**Completed and applied:** `architecture-reviewer`, `security-reviewer`,
+`code-reviewer`. All confirmed findings were fixed — see the commits
+"Apply architecture review findings" and "Apply security and code review
+findings".
 
-**Completed:** `architecture-reviewer` only. Its findings were applied — see
-the commit "Apply architecture review findings".
+**Still to run:** `risk-classifier`.
 
-> **Nothing in this repo has been security-reviewed.** The auth flow, session
-> cookie handling, role gating, and the GDPR/KYC paths in the repository layer
-> are all unreviewed `AUTH`/`PII` surface. Re-run `security-reviewer`,
-> `code-reviewer`, and `risk-classifier` before this is treated as
-> production-ready or before Phase 4 adds payments.
+Verified after the fixes: `pnpm typecheck`, `pnpm lint`, `pnpm build` and
+`pnpm db:seed` all clean; routes behave correctly against a production build;
+a cross-origin POST to `/api/auth/session` is rejected with 403.
+
+**Confirmed NOT vulnerable** (checked explicitly, recorded so it isn't
+re-litigated): a user cannot self-assign `role: "admin"` — `UserRepository.update`
+omits `role` from its field allowlist, `setRole` has no callers, and
+`Object.fromEntries(formData)` cannot mass-assign because Zod strips unknown
+keys. The role is never read from the Firebase token, only from our database.
 
 **Known-unfixed findings from the architecture review** (deliberately deferred,
 not forgotten):

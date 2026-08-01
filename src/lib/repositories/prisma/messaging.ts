@@ -26,13 +26,29 @@ export class PrismaMessageRepository implements MessageRepository {
       ? await prisma.conversation.findUnique({
           where: { id: input.conversationId },
         })
-      : await prisma.conversation.findFirst({
+      : await prisma.conversation.findUnique({
           where: { participantIds: key },
         });
 
-    convRow ??= await prisma.conversation.create({
-      data: { participantIds: key, lastMessageText: input.text },
-    });
+    // A supplied-but-unresolvable conversationId is a caller bug. Silently
+    // creating a different thread hid it and split the conversation in two.
+    if (input.conversationId && !convRow) {
+      throw new Error(`Conversation ${input.conversationId} not found`);
+    }
+
+    if (!convRow) {
+      // participantIds is unique, so a concurrent create in the opposite
+      // direction loses the race rather than producing a duplicate thread.
+      convRow = await prisma.conversation
+        .create({ data: { participantIds: key, lastMessageText: input.text } })
+        .catch(async () => {
+          const existing = await prisma.conversation.findUnique({
+            where: { participantIds: key },
+          });
+          if (!existing) throw new Error("Could not open conversation");
+          return existing;
+        });
+    }
 
     const [messageRow, updatedConv] = await prisma.$transaction([
       prisma.message.create({
@@ -65,10 +81,12 @@ export class PrismaMessageRepository implements MessageRepository {
   ): Promise<Page<Conversation>> {
     const { limit, offset } = normalizePageParams(params);
 
-    // participantIds is a comma-joined sorted pair, so a substring match on the
-    // uid finds every thread the user is in. Postgres would use an array column
-    // with a containment operator instead.
-    const where = { participantIds: { contains: userId } };
+    // participantIds is comma-DELIMITED (",uidA,uidB,"), so matching on
+    // ",uid," anchors to a whole participant. An unanchored match relied on
+    // every id being a fixed-length Firebase uid — an invariant nothing
+    // enforces, and one the seed data already breaks with ids like
+    // "seed-digital-1". Postgres would use an array containment operator.
+    const where = { participantIds: { contains: `,${userId},` } };
 
     const [rows, total] = await Promise.all([
       prisma.conversation.findMany({
@@ -97,6 +115,11 @@ export class PrismaMessageRepository implements MessageRepository {
           conversationId: { in: conversations.map((c) => c.id) },
           receiverId: userId,
           read: false,
+          // Must match countUnread's filter. Without it, soft-deleting an
+          // unread message left a permanent "1 unread" badge on a thread that
+          // shows nothing new, while the dashboard's total never counted it —
+          // two numbers on screen contradicting each other.
+          isDeleted: false,
         },
         _count: { _all: true },
       }),
@@ -125,7 +148,7 @@ export class PrismaMessageRepository implements MessageRepository {
     userIdA: string,
     userIdB: string,
   ): Promise<Conversation | null> {
-    const row = await prisma.conversation.findFirst({
+    const row = await prisma.conversation.findUnique({
       where: { participantIds: conversationKey(userIdA, userIdB) },
     });
     return row ? toConversation(row) : null;

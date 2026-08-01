@@ -12,13 +12,13 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { homeForRole } from "@/lib/nav/config";
 import { repo } from "@/lib/repositories";
-import { USER_ROLES } from "@/lib/repositories/types";
+import { SELF_SELECTABLE_ROLES } from "@/lib/repositories/types";
 
 const schema = z.object({
-  // "admin" is deliberately excluded: admin is granted, never self-selected.
-  role: z.enum(
-    USER_ROLES.filter((r) => r !== "admin") as [string, ...string[]],
-  ),
+  // Allowlist from types.ts — admin is granted, never self-selected. Using the
+  // shared constant means a newly added privileged role is not self-assignable
+  // by default.
+  role: z.enum(SELF_SELECTABLE_ROLES),
   name: z.string().trim().min(2, "Enter your name").max(80),
   location: z.string().trim().max(120).optional(),
   title: z.string().trim().max(120).optional(),
@@ -57,7 +57,9 @@ export async function completeOnboarding(
     id: session.uid,
     email: session.email,
     name: input.name,
-    role: input.role as (typeof USER_ROLES)[number],
+    // No cast needed: z.enum(SELF_SELECTABLE_ROLES) already narrows this to a
+    // role the user is permitted to self-assign.
+    role: input.role,
     location: input.location || undefined,
     title: input.title || undefined,
     skills: input.skills

@@ -18,6 +18,18 @@ const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (n: number) => new Date(Date.now() - n * DAY);
 const daysAhead = (n: number) => new Date(Date.now() + n * DAY);
 
+/**
+ * Comma-DELIMITED list column, matching `joinList` in the repository mappers.
+ *
+ * The surrounding commas are what make token matching exact. Writing a bare
+ * "react,nextjs" here would produce seed data the repositories could never
+ * have written, and skill search would silently miss every seeded provider.
+ */
+const list = (...items: string[]) => `,${items.join(",")},`;
+
+/** Participant key, matching `conversationKey` in the mappers. */
+const convKeyFor = (a: string, b: string) => `,${[a, b].sort().join(",")},`;
+
 async function main() {
   console.log("Clearing existing data…");
 
@@ -55,7 +67,7 @@ async function main() {
       email: "admin@srn.test",
       name: "Asha Menon",
       role: "admin",
-      privileges: "users,disputes,verification,flags,revenue",
+      privileges: list("users", "disputes", "verification", "flags", "revenue"),
       isVerified: true,
       createdAt: daysAgo(180),
     },
@@ -99,7 +111,7 @@ async function main() {
       name: "Arjun Nair",
       role: "digital",
       title: "Full-stack developer",
-      skills: "react,nextjs,typescript,node,postgres",
+      skills: list("react", "nextjs", "typescript", "node", "postgres"),
       hourlyRate: 2200,
       location: "Kochi, KL",
       bio: "8 years building web products. React/Next specialist, comfortable owning delivery end to end.",
@@ -122,7 +134,7 @@ async function main() {
       name: "Priya Sharma",
       role: "digital",
       title: "Product designer",
-      skills: "figma,ui,ux,branding,webflow",
+      skills: list("figma", "ui", "ux", "branding", "webflow"),
       hourlyRate: 1800,
       location: "Remote",
       bio: "Design systems and marketing sites. I work fast and I document what I hand over.",
@@ -141,7 +153,7 @@ async function main() {
       name: "Suresh Kumar",
       role: "local",
       title: "Certified electrician",
-      skills: "electrical,wiring,inverter,repair",
+      skills: list("electrical", "wiring", "inverter", "repair"),
       hourlyRate: 650,
       serviceRadiusKm: 25,
       location: "Bengaluru, KA",
@@ -149,6 +161,9 @@ async function main() {
       phone: "+919812345604",
       phoneVerified: true,
       isVerified: true,
+      // Has an active elite subscription below; activateFromPayment maintains
+      // isPremium === (tier !== "free"), so the seed must match that invariant.
+      isPremium: true,
       completedGigs: 87,
       onTimeRate: 0.98,
       aiTrustScore: 92,
@@ -163,7 +178,7 @@ async function main() {
       name: "Fatima Begum",
       role: "local",
       title: "Interior painter",
-      skills: "painting,interior,texture,waterproofing",
+      skills: list("painting", "interior", "texture", "waterproofing"),
       hourlyRate: 500,
       serviceRadiusKm: 15,
       location: "Bengaluru, KA",
@@ -181,7 +196,7 @@ async function main() {
       name: "Karan Malhotra",
       role: "digital",
       title: "Junior developer",
-      skills: "javascript,react",
+      skills: list("javascript", "react"),
       hourlyRate: 800,
       location: "Delhi, DL",
       createdAt: daysAgo(3),
@@ -213,12 +228,26 @@ async function main() {
 
   console.log("Seeding notification prefs, referrals, presence…");
 
-  for (const u of allUsers) {
+  // Codes must look like generated ones: CODE_ALPHABET excludes 0/O/1/I
+  // because these get read aloud, and never contains "-". Assigned from a
+  // fixed list so they stay unique and stable across re-seeds.
+  const REFERRAL_CODES = [
+    "SRNADMN2",
+    "SRNBIZ34",
+    "SRNCUST5",
+    "SRNDEV77",
+    "SRNDSGN8",
+    "SRNELEC9",
+    "SRNPNT23",
+    "SRNJUNR4",
+  ];
+
+  for (const [index, u] of allUsers.entries()) {
     await prisma.notificationPref.create({ data: { userId: u.id } });
     await prisma.referral.create({
       data: {
         userId: u.id,
-        code: `SRN${u.id.slice(-6).toUpperCase()}`,
+        code: REFERRAL_CODES[index],
         signupCount: u.id === digital.id ? 7 : u.id === local.id ? 3 : 0,
         rewardPoints: u.id === digital.id ? 700 : u.id === local.id ? 300 : 0,
       },
@@ -241,7 +270,7 @@ async function main() {
       category: "Web Development",
       description:
         "We need a portal where our customers can track shipments in real time. Auth, a dashboard, and a status timeline. Existing REST API to integrate against.",
-      skillsNeeded: "react,nextjs,typescript",
+      skillsNeeded: list("react", "nextjs", "typescript"),
       minBudget: 80000,
       maxBudget: 150000,
       location: "Remote",
@@ -257,7 +286,7 @@ async function main() {
       category: "Design",
       description:
         "Current site is six years old. Need a modern redesign, five pages, plus a component library we can extend.",
-      skillsNeeded: "figma,ui,branding",
+      skillsNeeded: list("figma", "ui", "branding"),
       minBudget: 40000,
       maxBudget: 75000,
       location: "Remote",
@@ -273,7 +302,7 @@ async function main() {
       category: "Electrical",
       description:
         "Old wiring in two bedrooms needs replacing. Also want an inverter installed to cover fans and lights during outages.",
-      skillsNeeded: "electrical,wiring,inverter",
+      skillsNeeded: list("electrical", "wiring", "inverter"),
       minBudget: 15000,
       maxBudget: 30000,
       location: "Bengaluru, KA",
@@ -288,7 +317,7 @@ async function main() {
       title: "Paint living room and hallway",
       category: "Painting",
       description: "Roughly 600 sq ft. Want a textured finish on one feature wall.",
-      skillsNeeded: "painting,interior,texture",
+      skillsNeeded: list("painting", "interior", "texture"),
       minBudget: 12000,
       maxBudget: 20000,
       location: "Bengaluru, KA",
@@ -491,7 +520,7 @@ async function main() {
 
   console.log("Seeding conversations and messages…");
 
-  const convKey = [business.id, digital.id].sort().join(",");
+  const convKey = convKeyFor(business.id, digital.id);
   const conv1 = await prisma.conversation.create({
     data: {
       participantIds: convKey,
@@ -525,7 +554,7 @@ async function main() {
 
   const conv2 = await prisma.conversation.create({
     data: {
-      participantIds: [customer.id, local.id].sort().join(","),
+      participantIds: convKeyFor(customer.id, local.id),
       lastMessageAt: daysAgo(4),
       lastMessageText: "I can come by Saturday morning to look at the wiring.",
       createdAt: daysAgo(5),
@@ -554,9 +583,24 @@ async function main() {
   });
 
   // A flagged message so the moderation queue has content.
-  await prisma.message.create({
+  //
+  // It gets its OWN conversation: putting it in conv1 (business + digital)
+  // while sending it from pendingProvider produced a row no repository could
+  // create — invisible to its own sender, yet counted in the recipient's
+  // unread badge for a thread the sender isn't in.
+  const conv3 = await prisma.conversation.create({
     data: {
-      conversationId: conv1.id,
+      participantIds: convKeyFor(business.id, pendingProvider.id),
+      lastMessageAt: daysAgo(6),
+      lastMessageText:
+        "Contact me directly on WhatsApp at 98xxxxxx to skip the platform fee.",
+      createdAt: daysAgo(6),
+    },
+  });
+
+  const flaggedMessage = await prisma.message.create({
+    data: {
+      conversationId: conv3.id,
       senderId: pendingProvider.id,
       receiverId: business.id,
       text: "Contact me directly on WhatsApp at 98xxxxxx to skip the platform fee.",
@@ -575,6 +619,10 @@ async function main() {
       details:
         "Agreed scope was three modules; only one was delivered by the deadline and communication stopped.",
       status: "open",
+      // DisputeRepository.create would have captured this. Without it,
+      // resolving the dispute falls back to "completed" for a booking that was
+      // never completed.
+      previousBookingStatus: "in_progress",
       createdAt: daysAgo(20),
     },
   });
@@ -583,7 +631,7 @@ async function main() {
     data: {
       userId: pendingProvider.id,
       docType: "aadhaar",
-      docUrls: "/uploads/seed/kyc-karan-front.jpg,/uploads/seed/kyc-karan-back.jpg",
+      docUrls: list("/uploads/seed/kyc-karan-front.jpg", "/uploads/seed/kyc-karan-back.jpg"),
       status: "pending",
       createdAt: daysAgo(2),
     },
@@ -593,7 +641,7 @@ async function main() {
     data: {
       userId: local2.id,
       docType: "pan",
-      docUrls: "/uploads/seed/kyc-fatima.jpg",
+      docUrls: list("/uploads/seed/kyc-fatima.jpg"),
       status: "pending",
       createdAt: daysAgo(1),
     },
@@ -603,7 +651,7 @@ async function main() {
     data: {
       userId: digital.id,
       docType: "pan",
-      docUrls: "/uploads/seed/kyc-arjun.jpg",
+      docUrls: list("/uploads/seed/kyc-arjun.jpg"),
       status: "approved",
       reviewedById: admin.id,
       reviewNote: "Documents match profile details.",
@@ -651,7 +699,10 @@ async function main() {
 
   const blocked = new Date();
   blocked.setUTCHours(0, 0, 0, 0);
-  blocked.setDate(blocked.getDate() + 5);
+  // setUTCDate, not setDate: local-calendar arithmetic shifts by an hour across
+  // a DST boundary and the result stops being exactly UTC midnight, which
+  // breaks the exact-equality blocked-date lookup.
+  blocked.setUTCDate(blocked.getUTCDate() + 5);
   await prisma.blockedDate.create({
     data: { userId: local.id, date: blocked, reason: "Family function" },
   });
@@ -744,6 +795,9 @@ async function main() {
       reporterId: business.id,
       reportedId: pendingProvider.id,
       targetType: "message",
+      // createReport requires targetId to flag the message; without it the
+      // moderation queue showed a message report that linked nowhere.
+      targetId: flaggedMessage.id,
       reason: "Attempting to take payment off-platform",
       details: "Asked to move the conversation to WhatsApp to avoid fees.",
       status: "open",

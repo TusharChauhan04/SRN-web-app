@@ -40,6 +40,45 @@ export const ROLE_COLORS: Record<UserRole, string> = {
   admin: "#dc2626",
 };
 
+/**
+ * Roles a user may choose for themselves during onboarding.
+ *
+ * An ALLOWLIST, deliberately — the rule used to be expressed as "everything
+ * except admin", which means any privileged role added later is self-assignable
+ * by default until someone remembers to exclude it. It was also stated twice,
+ * in two different directions, in the onboarding action and its form.
+ *
+ * Adding a role to USER_ROLES without classifying it here is a build error, via
+ * the exhaustiveness check below.
+ */
+export const SELF_SELECTABLE_ROLES = [
+  "business",
+  "customer",
+  "digital",
+  "local",
+] as const satisfies readonly UserRole[];
+
+export type SelfSelectableRole = (typeof SELF_SELECTABLE_ROLES)[number];
+
+/** Roles that may only be granted by an existing admin. */
+export const GRANTED_ONLY_ROLES = ["admin"] as const satisfies readonly UserRole[];
+
+// Fails to compile if a new role is added to USER_ROLES and classified in
+// neither list above.
+type _RolesAreFullyClassified =
+  Exclude<
+    UserRole,
+    SelfSelectableRole | (typeof GRANTED_ONLY_ROLES)[number]
+  > extends never
+    ? true
+    : ["Unclassified role — add it to SELF_SELECTABLE_ROLES or GRANTED_ONLY_ROLES"];
+const _rolesAreFullyClassified: _RolesAreFullyClassified = true;
+void _rolesAreFullyClassified;
+
+export function isSelfSelectableRole(role: string): role is SelfSelectableRole {
+  return (SELF_SELECTABLE_ROLES as readonly string[]).includes(role);
+}
+
 /** Roles that bid on requirements rather than post them. */
 export const PROVIDER_ROLES: UserRole[] = ["digital", "local"];
 /** Roles that post requirements rather than bid on them. */
@@ -124,6 +163,38 @@ export interface User {
 
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * A provider as shown on public discovery surfaces.
+ *
+ * Deliberately a separate type rather than `Partial<User>`: the compiler should
+ * refuse code that reaches for `email`, `phone`, `fcmToken`, `privileges` or
+ * `deletionRequestedAt` on a search result. Returning full `User` rows from
+ * provider search is how PII leaks into a feed.
+ */
+export interface PublicUser {
+  id: string;
+  name: string;
+  role: UserRole;
+  title?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  avatarUrl?: string | null;
+  skills: string[];
+  portfolioLinks: string[];
+  hourlyRate?: number | null;
+  rating: number;
+  reviewsCount: number;
+  completedGigs: number;
+  onTimeRate?: number | null;
+  isVerified: boolean;
+  isPremium: boolean;
+  isAvailable: boolean;
+  serviceRadiusKm?: number | null;
+  companyName?: string | null;
+  industry?: string | null;
+  createdAt: Date;
 }
 
 export interface Requirement {
