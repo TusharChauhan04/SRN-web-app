@@ -2,7 +2,7 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phases 0–2 done. Phase 3 (customer/business flows) is next.
+**Status:** Phases 0–3 done. Phase 4 (provider flows + payments) is next.
 **Last updated:** 2026-08-01
 
 ## Resume here
@@ -11,12 +11,23 @@
 redirect to `/login` when signed out; `/login` renders; `/api/healthz` returns
 `database: up`. Data layer is complete and seeded (`pnpm db:seed`).
 
-**Next step:** Phase 3, starting with `/requirements/new` (post a requirement) and
-`/requirements/[id]` (detail + quote list + shortlist). The dashboard already links
-to both. Follow the pattern established in `(app)/dashboard/page.tsx`: server
-component → `requireUser()` → `repo.*` → render. Mutations go through Server
-Actions like `(auth)/onboarding/actions.ts`, or Route Handlers where a client
-component needs to call them.
+**Architecture (changed after Phase 2 — read this before adding a screen):**
+the frontend no longer touches the data layer. Everything crosses one boundary:
+
+    UI  →  gateway  →  service  →  repository  →  provider / database
+
+Server components call `gateway.*` from `@/lib/gateway`; client components call
+`callGateway()` from `@/lib/gateway/client`, which posts to
+`/api/v1/:operation`. Both run the same pipeline. **ESLint fails the build** if
+a page imports a repository, a service, Prisma, or a provider SDK.
+
+Auth and payments are pluggable providers with working local implementations,
+so the app runs with no third-party credentials. See README "Connecting real
+services".
+
+**Next step:** Phase 4 — provider flows (portfolio, availability, earnings,
+analytics) and wiring subscription checkout through the payment provider. Copy
+the pattern from any Phase 3 screen: page → `gateway.*` → service → repo.
 
 **Reviews:** `architecture-reviewer`, `security-reviewer`, `code-reviewer` and
 `risk-classifier` have all run and their confirmed findings are fixed (§8.3).
@@ -255,22 +266,22 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
-| Customer dashboard | `dashboards/CustomerDashboard.tsx` | `/dashboard` | requirements, bookings | none | Not Started | |
-| Business dashboard | `dashboards/BusinessDashboard.tsx` | `/dashboard` | requirements, quotes | none | Not Started | Same route, role-branched |
-| Post requirement | `shared/PostRequirementScreen.tsx` | `/requirements/new` | requirements | none | Not Started | |
-| Requirement detail | `shared/RequirementDetailScreen.tsx` | `/requirements/[id]` | requirements, quotes | none | Not Started | incl. shortlist |
-| Search / discover | `shared/SearchScreen.tsx` | `/search` | users, requirements | none | Not Started | 3 search endpoints |
-| Provider profile | `shared/ProviderProfileScreen.tsx` | `/providers/[id]` | users, reviews, portfolio, profile_views | PII | Not Started | |
-| Bookings list | `customer/BookingsScreen.tsx` | `/bookings` | bookings | none | Not Started | |
-| Booking detail | `shared/BookingDetailScreen.tsx` | `/bookings/[id]` | bookings | none | Not Started | |
-| Quote detail | `shared/QuoteDetailScreen.tsx` | `/quotes/[id]` | quotes | none | Not Started | accept/reject/counter |
-| Review | `shared/ReviewScreen.tsx` | `/bookings/[id]/review` | reviews | none | Not Started | |
-| Dispute (raise) | `shared/DisputeScreen.tsx` | `/bookings/[id]/dispute` | disputes | PII | Not Started | evidence upload |
-| Chat list | `shared/ChatListScreen.tsx` | `/messages` | conversations | PII | Not Started | |
-| Chat thread | `shared/ChatScreen.tsx` | `/messages/[conversationId]` | messages, presence | PII | Not Started | REST polling per §0.1 |
-| Notifications | `shared/NotificationsScreen.tsx` | `/notifications` | notifications | none | Not Started | |
-| Profile | `shared/ProfileScreen.tsx` | `/profile` | users | PII | Not Started | |
-| Settings | `shared/SettingsScreen.tsx` | `/settings` | users, notification prefs | PII | Not Started | |
+| Customer dashboard | `dashboards/CustomerDashboard.tsx` | `/dashboard` | requirements, bookings | none | **Ported** | |
+| Business dashboard | `dashboards/BusinessDashboard.tsx` | `/dashboard` | requirements, quotes | none | **Ported** | Same route, role-branched |
+| Post requirement | `shared/PostRequirementScreen.tsx` | `/requirements/new` | requirements | none | **Ported** | |
+| Requirement detail | `shared/RequirementDetailScreen.tsx` | `/requirements/[id]` | requirements, quotes | none | **Ported** | incl. shortlist |
+| Search / discover | `shared/SearchScreen.tsx` | `/search` | users, requirements | none | **Ported** | 3 search endpoints |
+| Provider profile | `shared/ProviderProfileScreen.tsx` | `/providers/[id]` | users, reviews, portfolio, profile_views | PII | **Ported** | |
+| Bookings list | `customer/BookingsScreen.tsx` | `/bookings` | bookings | none | **Ported** | |
+| Booking detail | `shared/BookingDetailScreen.tsx` | `/bookings/[id]` | bookings | none | **Ported** | |
+| Quote detail | `shared/QuoteDetailScreen.tsx` | `/quotes/[id]` | quotes | none | **Ported** | accept/reject/counter |
+| Review | `shared/ReviewScreen.tsx` | `/bookings/[id]/review` | reviews | none | **Ported** | |
+| Dispute (raise) | `shared/DisputeScreen.tsx` | `/bookings/[id]/dispute` | disputes | PII | **Ported** | evidence upload |
+| Chat list | `shared/ChatListScreen.tsx` | `/messages` | conversations | PII | **Ported** | |
+| Chat thread | `shared/ChatScreen.tsx` | `/messages/[conversationId]` | messages, presence | PII | **Ported** | REST polling per §0.1 |
+| Notifications | `shared/NotificationsScreen.tsx` | `/notifications` | notifications | none | **Ported** | |
+| Profile | `shared/ProfileScreen.tsx` | `/profile` | users | PII | **Ported** | |
+| Settings | `shared/SettingsScreen.tsx` | `/settings` | users, notification prefs | PII | **Ported** | |
 | Phone verification | `shared/PhoneVerificationScreen.tsx` | `/settings/phone` | users | AUTH | Not Started | |
 
 ### Phase 4 — Provider flows
@@ -279,7 +290,7 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 |---|---|---|---|---|---|---|
 | Digital dashboard | `dashboards/DigitalProviderDashboard.tsx` | `/dashboard` | quotes, bookings | none | Not Started | |
 | Local dashboard | `dashboards/LocalProviderDashboard.tsx` | `/dashboard` | bookings, leads | none | Not Started | |
-| Submit bid/quote | `shared/BidSubmitScreen.tsx` | `/requirements/[id]/bid` | quotes | none | Not Started | |
+| Submit bid/quote | `shared/BidSubmitScreen.tsx` | `/requirements/[id]/bid` | quotes | none | **Ported** | |
 | Portfolio | `digital/PortfolioScreen.tsx` | `/portfolio` | portfolio, uploads | **PII/INFRA** | Not Started | Arbitrary file upload — not `none`. Needs type/size limits and signed URLs |
 | Earnings | `digital/EarningsScreen.tsx` | `/earnings` | bookings, subscriptions | none | Not Started | |
 | Availability | `shared/AvailabilityScreen.tsx` | `/availability` | working_hours, blocked_dates | none | Not Started | date input |
