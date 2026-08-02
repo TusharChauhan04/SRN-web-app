@@ -547,6 +547,16 @@ export function toReport(row: Row): Report {
   };
 }
 
+export function toPhoneChallenge(row: Row) {
+  return {
+    userId: row.userId as string,
+    phone: row.phone as string,
+    codeHash: row.codeHash as string,
+    attempts: (row.attempts as number) ?? 0,
+    expiresAt: row.expiresAt as Date,
+  };
+}
+
 /**
  * Canonical participant key for a 1:1 conversation, e.g. ",alice,bob,".
  *

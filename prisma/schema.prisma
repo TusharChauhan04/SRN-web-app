@@ -95,6 +95,7 @@ model User {
   reportsAgainst       Report[]              @relation("Reported")
   auditEvents          AuditEvent[]
   notificationPrefs    NotificationPref?
+  phoneVerification    PhoneVerification?
 }
 
 // ─────────────────────────── Marketplace core ───────────────────────────
@@ -494,6 +495,24 @@ model FeatureFlag {
   description String?
 
   updatedAt DateTime @updatedAt
+}
+
+/// An in-flight phone verification challenge.
+///
+/// One row per user: requesting a new code replaces the old one, so a stale
+/// code can never be used after a resend. The code itself is never stored —
+/// only a hash salted with the phone number.
+model PhoneVerification {
+  userId    String   @id
+  phone     String
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
 model RateLimit {

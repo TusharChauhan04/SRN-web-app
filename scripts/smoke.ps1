@@ -73,7 +73,7 @@ Write-Output "  api dashboard.get -> $(Get-OpStatus $anon 'dashboard.get' $null)
 Write-Output "=== PROVIDER ==="
 $prov = New-Session "smoke-provider@test.local"
 Get-OpStatus $prov "auth.completeOnboarding" @{role = "digital"; name = "Smoke Dev"; title = "Dev"; skills = @("react") } | Out-Null
-foreach ($p in @("/", "/dashboard", "/requirements", "/portfolio", "/earnings", "/analytics", "/availability", "/subscription", "/messages", "/profile", "/settings", "/notifications", "/search")) {
+foreach ($p in @("/", "/dashboard", "/requirements", "/portfolio", "/earnings", "/analytics", "/availability", "/subscription", "/messages", "/profile", "/settings", "/notifications", "/search", "/referrals", "/settings/phone", "/settings/verification", "/settings/data")) {
   Write-Output "  $p -> $(Get-Status $prov $p)"
 }
 Write-Output "  /admin (must redirect away) -> $(Get-Status $prov '/admin')"

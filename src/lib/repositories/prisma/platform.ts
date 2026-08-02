@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db/client";
 import { assertAdmin, type Actor } from "../authorize";
 import type {
   AuditRepository,
+  PhoneChallenge,
+  PhoneVerificationRepository,
   CreateNotificationInput,
   CreateUploadInput,
   FeatureFlagRepository,
@@ -31,6 +33,7 @@ import {
   toFeatureFlag,
   toNotification,
   toNotificationPrefs,
+  toPhoneChallenge,
   toPresence,
   toReferral,
   toUpload,
@@ -135,17 +138,32 @@ function generateCode(length = 8): string {
 }
 
 export class PrismaReferralRepository implements ReferralRepository {
+  /**
+   * Idempotent and safe to call concurrently.
+   *
+   * The read-then-create version raced with itself: two parallel calls for a
+   * user with no row both saw none and both inserted, and the second violated
+   * the primary key. That surfaced as a 500 on the FIRST load of /referrals for
+   * every new user, then worked on reload — which is exactly the shape of bug
+   * that survives manual testing.
+   */
   async getOrCreateCode(userId: string): Promise<Referral> {
     const existing = await prisma.referral.findUnique({ where: { userId } });
     if (existing) return toReferral(existing);
 
-    // Retry on the (unlikely) collision rather than failing the request.
+    // Retry covers two distinct collisions: a duplicate code, and a concurrent
+    // insert of this same userId.
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = generateCode();
-      const taken = await prisma.referral.findUnique({ where: { code } });
-      if (taken) continue;
-      const row = await prisma.referral.create({ data: { userId, code } });
-      return toReferral(row);
+      try {
+        const row = await prisma.referral.create({ data: { userId, code } });
+        return toReferral(row);
+      } catch {
+        // Lost the race on userId — the other call already created the row.
+        const now = await prisma.referral.findUnique({ where: { userId } });
+        if (now) return toReferral(now);
+        // Otherwise the code collided; loop and pick another.
+      }
     }
     throw new Error("Could not generate a unique referral code");
   }
@@ -461,6 +479,49 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
       remaining: Math.max(0, limit - count),
       resetAt,
     };
+  }
+}
+
+// ─────────────────────────── Phone verification ───────────────────────────
+
+export class PrismaPhoneVerificationRepository
+  implements PhoneVerificationRepository
+{
+  async start(input: {
+    userId: string;
+    phone: string;
+    codeHash: string;
+    expiresAt: Date;
+  }): Promise<PhoneChallenge> {
+    // Upsert, not insert: requesting a new code must invalidate the previous
+    // one, or an old code stays usable for its full lifetime after a resend.
+    const row = await prisma.phoneVerification.upsert({
+      where: { userId: input.userId },
+      create: { ...input, attempts: 0 },
+      update: { ...input, attempts: 0 },
+    });
+    return toPhoneChallenge(row);
+  }
+
+  async find(userId: string): Promise<PhoneChallenge | null> {
+    const row = await prisma.phoneVerification.findUnique({ where: { userId } });
+    return row ? toPhoneChallenge(row) : null;
+  }
+
+  async recordAttempt(userId: string): Promise<number> {
+    const row = await prisma.phoneVerification.update({
+      where: { userId },
+      data: { attempts: { increment: 1 } },
+    });
+    return row.attempts;
+  }
+
+  async clear(userId: string): Promise<void> {
+    await prisma.phoneVerification
+      .delete({ where: { userId } })
+      .catch(() => {
+        // Already gone is the desired end state.
+      });
   }
 }
 

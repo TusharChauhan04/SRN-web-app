@@ -199,10 +199,18 @@ export async function reportUser(
 // ─────────────────────────── Referrals ───────────────────────────
 
 export async function getMyReferral(actor: User) {
-  const [referral, stats, leaderboard] = await Promise.all([
-    repo.referrals.getOrCreateCode(actor.id),
-    repo.referrals.stats(actor.id),
-    repo.referrals.leaderboard(10),
-  ]);
-  return { referral, stats, leaderboard };
+  // Deliberately NOT Promise.all with `stats()`: that calls getOrCreateCode
+  // internally, so running both in parallel raced two inserts for the same new
+  // user. The counters live on the referral row anyway, so one read serves both.
+  const referral = await repo.referrals.getOrCreateCode(actor.id);
+  const leaderboard = await repo.referrals.leaderboard(10);
+
+  return {
+    referral,
+    stats: {
+      signupCount: referral.signupCount,
+      rewardPoints: referral.rewardPoints,
+    },
+    leaderboard,
+  };
 }

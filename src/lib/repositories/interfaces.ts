@@ -612,6 +612,30 @@ export interface RateLimitRepository {
   ): Promise<{ allowed: boolean; remaining: number; resetAt: Date }>;
 }
 
+// ─────────────────────────── Phone verification ───────────────────────────
+
+export interface PhoneChallenge {
+  userId: string;
+  phone: string;
+  codeHash: string;
+  attempts: number;
+  expiresAt: Date;
+}
+
+export interface PhoneVerificationRepository {
+  /** Replaces any in-flight challenge, so a resend invalidates the old code. */
+  start(input: {
+    userId: string;
+    phone: string;
+    codeHash: string;
+    expiresAt: Date;
+  }): Promise<PhoneChallenge>;
+  find(userId: string): Promise<PhoneChallenge | null>;
+  /** Returns the new attempt count, for lockout after too many tries. */
+  recordAttempt(userId: string): Promise<number>;
+  clear(userId: string): Promise<void>;
+}
+
 // ─────────────────────────── Health ───────────────────────────
 
 export interface HealthRepository {
@@ -646,5 +670,6 @@ export interface Repositories {
   audit: AuditRepository;
   featureFlags: FeatureFlagRepository;
   rateLimit: RateLimitRepository;
+  phoneVerification: PhoneVerificationRepository;
   health: HealthRepository;
 }

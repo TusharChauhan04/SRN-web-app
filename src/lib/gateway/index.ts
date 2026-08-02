@@ -23,6 +23,7 @@ import * as book from "./operations/bookings";
 import * as acct from "./operations/account";
 import * as prov from "./operations/provider";
 import * as adm from "./operations/admin";
+import * as acct2 from "./operations/account2";
 
 /**
  * Extracts an operation's validated input type, so call sites stay honest.
@@ -146,6 +147,29 @@ export const gateway = {
 
   referrals: {
     mine: () => invoke(acct.myReferral, undefined),
+    apply: (input: In<typeof acct2.applyReferral>) =>
+      invoke(acct2.applyReferral, input),
+  },
+
+  phone: {
+    start: (input: In<typeof acct2.startPhone>) =>
+      invoke(acct2.startPhone, input),
+    confirm: (input: In<typeof acct2.confirmPhone>) =>
+      invoke(acct2.confirmPhone, input),
+  },
+
+  kyc: {
+    status: () => invoke(acct2.kycStatus, undefined),
+    submit: (input: In<typeof acct2.submitKyc>) =>
+      invoke(acct2.submitKyc, input),
+  },
+
+  gdpr: {
+    rights: () => invoke(acct2.dataRights, undefined),
+    export: () => invoke(acct2.exportData, undefined),
+    requestDeletion: (input: In<typeof acct2.requestDeletion>) =>
+      invoke(acct2.requestDeletion, input),
+    cancelDeletion: () => invoke(acct2.cancelDeletion, undefined),
   },
 
   portfolio: {
@@ -254,6 +278,7 @@ export function loadOperations(): void {
   void acct;
   void prov;
   void adm;
+  void acct2;
 }
 
 export { getOperation, invoke, registeredOperationNames } from "./core";

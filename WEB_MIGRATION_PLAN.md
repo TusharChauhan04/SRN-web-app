@@ -2,7 +2,7 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phases 0–5 done. Phase 6 (referrals, phone verification, GDPR UI) is next.
+**Status:** Phases 0–6 done. All 33 mobile screens converted. Phases 7–8 (web push decision, deployment checklist) remain, then the final audit.
 **Last updated:** 2026-08-01
 
 ## Resume here
@@ -25,9 +25,13 @@ Auth and payments are pluggable providers with working local implementations,
 so the app runs with no third-party credentials. See README "Connecting real
 services".
 
-**Next step:** Phase 6 — referrals, phone verification, and the GDPR
-export/delete UI. That leaves only the web-push decision (Phase 7) and the
-deployment checklist (Phase 8).
+**Next step:** Phase 7 — confirm or revisit the web-push deferral — then
+Phase 8's deployment checklist, then the full review and audit.
+
+**Regression safety:** `scripts/smoke.ps1` checks ~40 route and gateway
+responses across anonymous / provider / admin. Capture it before a risky
+change and diff after; it has already caught one contaminated baseline and
+proved three separate changes behaviour-neutral.
 
 **File storage** now exists as a provider too (`src/lib/providers/storage/`),
 with a working local implementation. Firebase Storage is stubbed with a clear
@@ -287,7 +291,7 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 | Notifications | `shared/NotificationsScreen.tsx` | `/notifications` | notifications | none | **Ported** | |
 | Profile | `shared/ProfileScreen.tsx` | `/profile` | users | PII | **Ported** | |
 | Settings | `shared/SettingsScreen.tsx` | `/settings` | users, notification prefs | PII | **Ported** | |
-| Phone verification | `shared/PhoneVerificationScreen.tsx` | `/settings/phone` | users | AUTH | Not Started | |
+| Phone verification | `shared/PhoneVerificationScreen.tsx` | `/settings/phone` | users | AUTH | **Ported** | |
 
 ### Phase 4 — Provider flows
 
@@ -327,11 +331,11 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Feature | Mobile source | Target web route | Data entities | Risk | Status | Notes |
 |---|---|---|---|---|---|---|
-| Referrals | `shared/ReferralsScreen.tsx` | `/referrals` | referrals | none | Not Started | clipboard |
+| Referrals | `shared/ReferralsScreen.tsx` | `/referrals` | referrals | none | **Ported** | clipboard |
 | Presence heartbeat | `routes/presence.ts` | `/api/presence/*` | presence | none | Not Started | |
 | Block / report user | `routes/blocking.ts` | in-context actions | blocks, reports | PII | Not Started | |
-| GDPR export | `routes/gdpr.ts:131` | `/settings/data` | all | PII | Not Started | |
-| GDPR account deletion | `routes/gdpr.ts:40,88` | `/settings/data` | all | DATA_DELETION | Not Started | + cancel-deletion |
+| GDPR export | `routes/gdpr.ts:131` | `/settings/data` | all | PII | **Ported** | |
+| GDPR account deletion | `routes/gdpr.ts:40,88` | `/settings/data` | all | DATA_DELETION | **Ported** | + cancel-deletion |
 | Rate limiting | `app.ts:107` | Route Handler middleware | rate_limits | INFRA | Not Started | Brief §7.5 |
 
 ### Phase 7 — Web push

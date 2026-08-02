@@ -30,6 +30,7 @@ import {
   PrismaPresenceRepository,
   PrismaRateLimitRepository,
   PrismaReferralRepository,
+  PrismaPhoneVerificationRepository,
   PrismaUploadRepository,
 } from "./prisma/platform";
 import {
@@ -71,6 +72,7 @@ export const repositories: Repositories = {
   audit: new PrismaAuditRepository(),
   featureFlags: new PrismaFeatureFlagRepository(),
   rateLimit: new PrismaRateLimitRepository(),
+  phoneVerification: new PrismaPhoneVerificationRepository(),
   health: new PrismaHealthRepository(),
 };
 

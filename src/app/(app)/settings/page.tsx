@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { gateway } from "@/lib/gateway";
 import { getCurrentUser } from "@/lib/auth/session";
+import Link from "next/link";
 import { Alert, Button, Card, CardHeader, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Settings — SRN" };
@@ -39,6 +40,24 @@ const TOGGLES = [
     name: "marketing",
     label: "Product updates",
     hint: "Occasional news about SRN. Off by default.",
+  },
+] as const;
+
+const ACCOUNT_LINKS = [
+  {
+    href: "/settings/phone",
+    label: "Phone number",
+    hint: "Verify your number to build trust with customers.",
+  },
+  {
+    href: "/settings/verification",
+    label: "Identity verification",
+    hint: "Submit documents to get a verified badge.",
+  },
+  {
+    href: "/settings/data",
+    label: "Your data",
+    hint: "Download everything we hold, or close your account.",
   },
 ] as const;
 
@@ -90,6 +109,33 @@ export default async function SettingsPage() {
 
         <Card>
           <CardHeader
+            title="Account"
+            description="Verification and your data."
+          />
+          <ul className="divide-y divide-[var(--border)]">
+            {ACCOUNT_LINKS.map((link) => (
+              <li key={link.href}>
+                <Link
+                  href={link.href}
+                  className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-[var(--muted)]"
+                >
+                  <span className="min-w-0">
+                    <span className="block font-medium">{link.label}</span>
+                    <span className="block text-sm text-[var(--muted-foreground)]">
+                      {link.hint}
+                    </span>
+                  </span>
+                  <span aria-hidden className="text-[var(--muted-foreground)]">
+                    →
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <Card>
+          <CardHeader
             title="Push notifications"
             description="Browser push is not enabled."
           />
@@ -102,19 +148,6 @@ export default async function SettingsPage() {
             <Alert tone="info">
               Web push is deferred for now. You&apos;ll still see everything in
               the notifications tab, and by email if you enable it above.
-            </Alert>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader
-            title="Your data"
-            description="Export or delete everything we hold about you."
-          />
-          <div className="p-5">
-            <Alert tone="info">
-              Data export and account deletion arrive with the GDPR screens.
-              The operations exist behind the scenes; the UI is next.
             </Alert>
           </div>
         </Card>
