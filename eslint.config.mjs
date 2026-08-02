@@ -92,6 +92,47 @@ const eslintConfig = defineConfig([
     },
   },
 
+  /*
+   * ── proxy.ts: redirect optimisation only ────────────────────────────────
+   *
+   * Under the old `middleware` convention the Edge runtime made this
+   * self-enforcing — auth SDKs simply could not load there. Next 16 runs proxy
+   * files on Node, so that accidental guardrail is gone and this rule replaces
+   * it deliberately.
+   *
+   * The rule is not about what is technically possible, it is about coverage:
+   * proxy.ts never runs for /api/*, so a check placed here is absent from
+   * every route that carries data.
+   */
+  {
+    files: ["src/proxy.ts"],
+    rules: {
+      "no-restricted-imports": "off",
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/lib/providers/*",
+                "@/lib/gateway",
+                "@/lib/gateway/*",
+                "@/lib/auth/session",
+                "@/lib/services/*",
+                "@/lib/repositories",
+                "@/lib/repositories/*",
+                "@/lib/db",
+                "@/lib/db/*",
+              ],
+              message:
+                "proxy.ts is a redirect optimisation, not a security boundary. It does not run for /api/*, so any check here is absent from every data route. Enforce in the gateway pipeline (assertAccess) or an authenticated layout instead. Importing the session cookie NAME from @/lib/auth/cookie is fine.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // ── Gateway layer: may use services, not repositories directly ───────────
   {
     files: ["src/lib/gateway/**/*.ts"],
@@ -128,6 +169,8 @@ const eslintConfig = defineConfig([
       "src/app/**",
       "src/components/**",
       "src/lib/gateway/**",
+      // Has its own, stricter block above.
+      "src/proxy.ts",
     ],
     rules: {
       "no-restricted-imports": "off",
@@ -165,6 +208,7 @@ const eslintConfig = defineConfig([
       "src/app/**",
       "src/components/**",
       "src/lib/gateway/**",
+      "src/proxy.ts",
     ],
     rules: {
       "no-restricted-imports": "off",

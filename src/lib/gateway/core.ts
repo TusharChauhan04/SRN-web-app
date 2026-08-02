@@ -12,7 +12,7 @@ import "server-only";
  * Centralising it is the point: authorization, throttling and validation cannot
  * be forgotten on one screen out of forty, because there is no other way in.
  */
-import { ZodError, type TypeOf, type ZodType } from "zod";
+import type { TypeOf, ZodType } from "zod";
 import { repo } from "@/lib/repositories";
 import {
   RepositoryForbiddenError,
@@ -167,16 +167,36 @@ export async function invoke<TInput, TOutput>(
   // 2. Who may call this at all.
   assertAccess(ctx, def as OperationDefinition<unknown, unknown>);
 
-  // 3. Shape and bounds of the input.
-  let input: TInput;
-  try {
-    input = def.input.parse(rawInput);
-  } catch (err) {
-    if (err instanceof ZodError) {
-      throw GatewayError.validation("Check the values you entered", err.issues);
-    }
-    throw err;
+  /*
+   * 3. Shape and bounds of the input.
+   *
+   * A missing input retries as `{}`. An operation whose parameters are all
+   * optional is otherwise unreachable over HTTP without explicitly sending
+   * `"input": {}`, because JSON.stringify drops an undefined property — so
+   * `callGateway("someOp")` would fail validation on a call that is entirely
+   * valid. No such operation exists today; this is forward-looking, since the
+   * first one added would fail in a confusing way.
+   *
+   * Asking the SCHEMA rather than checking its class: `z.void()` accepts
+   * undefined and so never reaches the retry (a stray payload is still
+   * rejected), while a schema with required fields fails both attempts and
+   * surfaces the more useful "required" message rather than "expected object,
+   * received undefined". An `instanceof ZodObject` test would instead go stale
+   * the moment someone writes `.transform()`, `.default()` or a union.
+   */
+  const firstAttempt = def.input.safeParse(rawInput);
+  const parsed =
+    !firstAttempt.success && rawInput === undefined
+      ? def.input.safeParse({})
+      : firstAttempt;
+
+  if (!parsed.success) {
+    throw GatewayError.validation(
+      "Check the values you entered",
+      parsed.error.issues,
+    );
   }
+  const input: TInput = parsed.data;
 
   // 4. The handler. `user` is non-null for every policy that reaches here with
   // one; `onboarding` and `public` handlers must not read it.

@@ -1,10 +1,14 @@
 /**
  * Session cookie constants.
  *
- * Deliberately in their own module with NO imports: `middleware.ts` runs on the
- * Edge runtime and needs the cookie name, but must not pull in `firebase-admin`
- * (Node-only) as a side effect. Importing these from lib/firebase/admin.ts
- * crashes every middleware-matched route with a 500.
+ * Deliberately in their own module with NO imports.
+ *
+ * Originally this was a hard requirement: `middleware.ts` ran on the Edge
+ * runtime and pulling in `firebase-admin` through a shared module crashed every
+ * matched route with a 500. Next 16's `proxy.ts` runs on Node, so that is no
+ * longer a crash — but keeping this module dependency-free is still right. It
+ * means the one constant shared between the request filter and the auth layer
+ * drags nothing along with it.
  */
 export const SESSION_COOKIE_NAME = "srn_session";
 

@@ -251,10 +251,12 @@ Google sign-in). Our database owns the *profile* (role, name, subscription,
 everything else), keyed by the Firebase uid. The role is never read from the
 token — always from our own database.
 
-**Middleware is not a security boundary.** `src/middleware.ts` only checks that
-a session cookie exists, because the Firebase Admin SDK cannot verify one on the
-Edge runtime. Real verification and role checks happen server-side in layouts
-and in `requireUser` / `requireRole` on every handler.
+**The request filter is not a security boundary.** `src/proxy.ts` (Next 16's
+replacement for `middleware`) only checks that a session cookie *exists*, and it
+never runs for `/api/*` at all — so any check placed there would be absent from
+every route that carries data. Real verification and role checks happen
+server-side in the gateway pipeline and the authenticated layouts. An ESLint
+rule restricts what `proxy.ts` may import, so this stays true.
 
 **Chat is REST polling, not realtime.** This matches the mobile app, which
 despite appearances does not use Firestore listeners. The reasoning and evidence

@@ -24,7 +24,14 @@ import * as acct from "./operations/account";
 import * as prov from "./operations/provider";
 import * as adm from "./operations/admin";
 
-/** Extracts an operation's validated input type, so call sites stay honest. */
+/**
+ * Extracts an operation's validated input type, so call sites stay honest.
+ *
+ * Methods whose parameters are all optional take `input?` and pass `undefined`
+ * straight through — `invoke` is the single place that decides what a missing
+ * input means. Defaulting to `{}` here as well would encode the same rule
+ * twice, and two encodings drift.
+ */
 type In<T> = T extends { input: { parse: (v: unknown) => infer R } } ? R : never;
 
 export const gateway = {
@@ -44,10 +51,10 @@ export const gateway = {
 
   requirements: {
     create: (input: In<typeof req.create>) => invoke(req.create, input),
-    listMine: (input: In<typeof req.listMine> = {}) =>
+    listMine: (input?: In<typeof req.listMine>) =>
       invoke(req.listMine, input),
-    feed: (input: In<typeof req.feed> = {}) => invoke(req.feed, input),
-    browse: (input: In<typeof req.browse> = {}) => invoke(req.browse, input),
+    feed: (input?: In<typeof req.feed>) => invoke(req.feed, input),
+    browse: (input?: In<typeof req.browse>) => invoke(req.browse, input),
     detail: (input: In<typeof req.detail>) => invoke(req.detail, input),
     setStatus: (input: In<typeof req.setStatus>) => invoke(req.setStatus, input),
     delete: (input: In<typeof req.remove>) => invoke(req.remove, input),
@@ -56,7 +63,7 @@ export const gateway = {
   quotes: {
     submit: (input: In<typeof req.submitQuote>) =>
       invoke(req.submitQuote, input),
-    listMine: (input: In<typeof req.listMyQuotes> = {}) =>
+    listMine: (input?: In<typeof req.listMyQuotes>) =>
       invoke(req.listMyQuotes, input),
     detail: (input: In<typeof req.quoteDetail>) =>
       invoke(req.quoteDetail, input),
@@ -71,7 +78,7 @@ export const gateway = {
   bookings: {
     acceptQuote: (input: In<typeof book.acceptQuote>) =>
       invoke(book.acceptQuote, input),
-    listMine: (input: In<typeof book.listMine> = {}) =>
+    listMine: (input?: In<typeof book.listMine>) =>
       invoke(book.listMine, input),
     detail: (input: In<typeof book.detail>) => invoke(book.detail, input),
     setStatus: (input: In<typeof book.setStatus>) =>
@@ -88,7 +95,7 @@ export const gateway = {
   disputes: {
     raise: (input: In<typeof book.raiseDispute>) =>
       invoke(book.raiseDispute, input),
-    listMine: (input: In<typeof book.listMyDisputes> = {}) =>
+    listMine: (input?: In<typeof book.listMyDisputes>) =>
       invoke(book.listMyDisputes, input),
   },
 
@@ -100,12 +107,12 @@ export const gateway = {
   },
 
   search: {
-    providers: (input: In<typeof acct.searchProviders> = {}) =>
+    providers: (input?: In<typeof acct.searchProviders>) =>
       invoke(acct.searchProviders, input),
   },
 
   notifications: {
-    list: (input: In<typeof acct.listNotifications> = {}) =>
+    list: (input?: In<typeof acct.listNotifications>) =>
       invoke(acct.listNotifications, input),
     markRead: (input: In<typeof acct.markNotificationRead>) =>
       invoke(acct.markNotificationRead, input),
@@ -116,7 +123,7 @@ export const gateway = {
   },
 
   messages: {
-    listConversations: (input: In<typeof acct.listConversations> = {}) =>
+    listConversations: (input?: In<typeof acct.listConversations>) =>
       invoke(acct.listConversations, input),
     thread: (input: In<typeof acct.getThread>) => invoke(acct.getThread, input),
     send: (input: In<typeof acct.sendMessage>) =>
@@ -167,7 +174,7 @@ export const gateway = {
   },
 
   analytics: {
-    mine: (input: In<typeof prov.analytics> = {}) =>
+    mine: (input?: In<typeof prov.analytics>) =>
       invoke(prov.analytics, input),
   },
 
@@ -193,7 +200,7 @@ export const gateway = {
   admin: {
     overview: () => invoke(adm.overview, undefined),
 
-    listUsers: (input: In<typeof adm.listUsers> = {}) =>
+    listUsers: (input?: In<typeof adm.listUsers>) =>
       invoke(adm.listUsers, input),
     setSuspended: (input: In<typeof adm.setSuspended>) =>
       invoke(adm.setSuspended, input),
@@ -201,12 +208,12 @@ export const gateway = {
     eraseUser: (input: In<typeof adm.eraseUser>) =>
       invoke(adm.eraseUser, input),
 
-    listDisputes: (input: In<typeof adm.listDisputes> = {}) =>
+    listDisputes: (input?: In<typeof adm.listDisputes>) =>
       invoke(adm.listDisputes, input),
     resolveDispute: (input: In<typeof adm.resolveDispute>) =>
       invoke(adm.resolveDispute, input),
 
-    listVerifications: (input: In<typeof adm.listVerifications> = {}) =>
+    listVerifications: (input?: In<typeof adm.listVerifications>) =>
       invoke(adm.listVerifications, input),
     verificationDocuments: (input: In<typeof adm.getVerificationDocuments>) =>
       invoke(adm.getVerificationDocuments, input),
@@ -215,11 +222,11 @@ export const gateway = {
     rejectVerification: (input: In<typeof adm.rejectVerification>) =>
       invoke(adm.rejectVerification, input),
 
-    flaggedMessages: (input: In<typeof adm.listFlaggedMessages> = {}) =>
+    flaggedMessages: (input?: In<typeof adm.listFlaggedMessages>) =>
       invoke(adm.listFlaggedMessages, input),
     clearMessageFlag: (input: In<typeof adm.clearMessageFlag>) =>
       invoke(adm.clearMessageFlag, input),
-    listReports: (input: In<typeof adm.listReports> = {}) =>
+    listReports: (input?: In<typeof adm.listReports>) =>
       invoke(adm.listReports, input),
     resolveReport: (input: In<typeof adm.resolveReport>) =>
       invoke(adm.resolveReport, input),
@@ -228,7 +235,7 @@ export const gateway = {
     revenue: () => invoke(adm.revenue, undefined),
     listFlags: () => invoke(adm.listFlags, undefined),
     setFlag: (input: In<typeof adm.setFlag>) => invoke(adm.setFlag, input),
-    listAudit: (input: In<typeof adm.listAudit> = {}) =>
+    listAudit: (input?: In<typeof adm.listAudit>) =>
       invoke(adm.listAudit, input),
   },
 } as const;

@@ -54,6 +54,19 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   /**
+   * Pin the workspace root to THIS directory.
+   *
+   * Next infers the root from the nearest lockfile, and an unrelated
+   * `pnpm-lock.yaml` sitting in a parent directory made it treat that whole
+   * folder as the project. It happened to build correctly, but file tracing was
+   * rooted somewhere it shouldn't be — which decides what gets bundled into a
+   * deployment. Pinning it removes the guess.
+   */
+  turbopack: {
+    root: __dirname,
+  },
+
+  /**
    * Prisma ships platform-specific query engine binaries and resolves them with
    * runtime `require`, which the bundler cannot trace. Marking these external
    * keeps them in node_modules at runtime instead of being bundled.

@@ -7,9 +7,10 @@ import { Sidebar } from "@/components/nav/Sidebar";
 /**
  * Authenticated shell.
  *
- * This layout is the real gate for every page beneath it — middleware handles
- * the cheap redirect, but middleware runs on the Edge where the Admin SDK
- * cannot verify a session cookie, so the authoritative check lives here.
+ * This layout is the real gate for every page beneath it. `src/proxy.ts`
+ * handles the cheap pre-render redirect, but it never runs for /api/* and only
+ * checks that a cookie exists — so the authoritative check lives here, and in
+ * the gateway for data.
  */
 export default async function AppLayout({
   children,
