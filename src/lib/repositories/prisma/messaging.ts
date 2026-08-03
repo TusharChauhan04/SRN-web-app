@@ -40,7 +40,21 @@ export class PrismaMessageRepository implements MessageRepository {
       // participantIds is unique, so a concurrent create in the opposite
       // direction loses the race rather than producing a duplicate thread.
       convRow = await prisma.conversation
-        .create({ data: { participantIds: key, lastMessageText: input.text } })
+        .create({
+          data: {
+            participantIds: key,
+            lastMessageText: input.text,
+            // Written in the same statement as the thread, so a conversation
+            // can never exist without its participant rows — which is what
+            // listConversations now reads.
+            participants: {
+              create: [
+                { userId: input.senderId },
+                { userId: input.receiverId },
+              ],
+            },
+          },
+        })
         .catch(async () => {
           const existing = await prisma.conversation.findUnique({
             where: { participantIds: key },
@@ -81,12 +95,20 @@ export class PrismaMessageRepository implements MessageRepository {
   ): Promise<Page<Conversation>> {
     const { limit, offset } = normalizePageParams(params);
 
-    // participantIds is comma-DELIMITED (",uidA,uidB,"), so matching on
-    // ",uid," anchors to a whole participant. An unanchored match relied on
-    // every id being a fixed-length Firebase uid — an invariant nothing
-    // enforces, and one the seed data already breaks with ids like
-    // "seed-digital-1". Postgres would use an array containment operator.
-    const where = { participantIds: { contains: `,${userId},` } };
+    /*
+     * Indexed lookup through the join table.
+     *
+     * This was `participantIds: { contains: ",uid," }` — a LIKE with a leading
+     * wildcard, which no index can seek. EXPLAIN QUERY PLAN confirmed the cost:
+     * the list scanned the lastMessageAt index (exiting early only for a user
+     * with recent threads), and the COUNT beside it, having no LIMIT, scanned
+     * every conversation in the table on every /messages load.
+     *
+     * `ConversationParticipant.userId` is indexed, so both are now seeks over
+     * this user's own rows. The remaining sort is bounded by how many threads
+     * THIS user has, not by the size of the table.
+     */
+    const where = { participants: { some: { userId } } };
 
     const [rows, total] = await Promise.all([
       prisma.conversation.findMany({

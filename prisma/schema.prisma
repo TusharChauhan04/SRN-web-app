@@ -79,32 +79,33 @@ model User {
   updatedAt DateTime @updatedAt
 
   requirements         Requirement[]
-  quotesSent           Quote[]               @relation("QuoteSender")
-  quotesReceived       Quote[]               @relation("QuoteReceiver")
-  bookingsAsCustomer   Booking[]             @relation("BookingCustomer")
-  bookingsAsProvider   Booking[]             @relation("BookingProvider")
-  messagesSent         Message[]             @relation("MessageSender")
-  reviewsWritten       Review[]              @relation("ReviewAuthor")
-  reviewsReceived      Review[]              @relation("ReviewSubject")
+  quotesSent           Quote[]                   @relation("QuoteSender")
+  quotesReceived       Quote[]                   @relation("QuoteReceiver")
+  bookingsAsCustomer   Booking[]                 @relation("BookingCustomer")
+  bookingsAsProvider   Booking[]                 @relation("BookingProvider")
+  messagesSent         Message[]                 @relation("MessageSender")
+  reviewsWritten       Review[]                  @relation("ReviewAuthor")
+  reviewsReceived      Review[]                  @relation("ReviewSubject")
   notifications        Notification[]
-  disputesRaised       Dispute[]             @relation("DisputeRaiser")
+  disputesRaised       Dispute[]                 @relation("DisputeRaiser")
   portfolioItems       PortfolioItem[]
   verificationRequests VerificationRequest[]
   subscription         Subscription?
   uploads              Upload[]
   workingHours         WorkingHours[]
   blockedDates         BlockedDate[]
-  profileViewsReceived ProfileView[]         @relation("ProfileViewSubject")
+  profileViewsReceived ProfileView[]             @relation("ProfileViewSubject")
   presence             Presence?
   referralCode         Referral?
-  blocksMade           Block[]               @relation("Blocker")
-  blocksReceived       Block[]               @relation("Blocked")
-  reportsMade          Report[]              @relation("Reporter")
-  reportsAgainst       Report[]              @relation("Reported")
+  blocksMade           Block[]                   @relation("Blocker")
+  blocksReceived       Block[]                   @relation("Blocked")
+  reportsMade          Report[]                  @relation("Reporter")
+  reportsAgainst       Report[]                  @relation("Reported")
   auditEvents          AuditEvent[]
   notificationPrefs    NotificationPref?
   phoneVerification    PhoneVerification?
   subscriptionOrders   SubscriptionOrder[]
+  conversations        ConversationParticipant[]
 
   /// countCreatedSince and the admin growth series filter on createdAt;
   /// without this both are full table scans of the largest table.
@@ -232,20 +233,46 @@ model Review {
 // ─────────────────────────── Messaging ───────────────────────────
 
 model Conversation {
-  id              String   @id @default(cuid())
-  /// Comma-joined participant uids, sorted — the lookup key for 1:1 threads.
-  /// Unique: without it, two simultaneous messages in opposite directions
-  /// create duplicate threads that can never be merged. Also gives the lookup
-  /// an index instead of a leading-wildcard table scan.
+  id String @id @default(cuid())
+
+  /// Comma-joined participant uids, sorted. RETAINED as the uniqueness key for
+  /// 1:1 threads: without it, two simultaneous messages in opposite directions
+  /// create duplicate threads that can never be merged, and a join table alone
+  /// cannot express "exactly this set of participants" as a constraint.
+  ///
+  /// It is NO LONGER used to find a user's conversations — see
+  /// ConversationParticipant. That query was `LIKE '%,uid,%'`, which the planner
+  /// confirmed cannot seek: the list scanned an index (terminating early only
+  /// if the user had recent threads) and the accompanying COUNT, having no
+  /// LIMIT, scanned every row on every /messages load.
   participantIds  String   @unique
   lastMessageAt   DateTime @default(now())
   lastMessageText String?
 
   createdAt DateTime @default(now())
 
-  messages Message[]
+  messages     Message[]
+  participants ConversationParticipant[]
 
   @@index([lastMessageAt])
+}
+
+/// Who is in a conversation — one row per participant.
+///
+/// Exists so "conversations for this user" is an index seek rather than a
+/// substring match over the whole table. Also removes the assumption that a
+/// thread has exactly two people, which is what would have to change first for
+/// group chat.
+model ConversationParticipant {
+  conversationId String
+  userId         String
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  /// The index that matters: list a user's threads without touching the rest.
+  @@index([userId])
 }
 
 model Message {

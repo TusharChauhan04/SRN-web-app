@@ -66,10 +66,38 @@ export function ChatThread({
   }, [scrollToBottom]);
 
   // ── Message polling ──────────────────────────────────────────────────────
+  /*
+   * Self-scheduling, not setInterval, and paused while the tab is hidden.
+   *
+   * `setInterval` fires on a fixed clock regardless of what came before, which
+   * fails in two compounding ways:
+   *
+   *   - No in-flight guard. When the server slows past the interval, requests
+   *     STACK — load rises exactly as the server degrades. That is the standard
+   *     way polling turns a slowdown into an outage.
+   *   - No visibility check. A background tab left open all day polled ~17,000
+   *     times, each costing a session verification and five queries, for a
+   *     screen nobody was looking at.
+   *
+   * Re-arming only after the previous request settles fixes the first; skipping
+   * hidden tabs and refreshing once on return fixes the second.
+   */
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      if (cancelled) return;
+      timer = setTimeout(() => void poll(), MESSAGE_POLL_MS);
+    };
 
     const poll = async () => {
+      // Skip the round trip entirely when nobody is looking, but keep the timer
+      // alive so polling resumes without waiting for a visibility event.
+      if (typeof document !== "undefined" && document.hidden) {
+        schedule();
+        return;
+      }
       try {
         const data = await callGateway<ThreadResponse>("messages.thread", {
           conversationId,
@@ -97,19 +125,37 @@ export function ChatThread({
       } catch {
         // Transient failure — the next tick retries. Don't surface an error
         // banner for a poll the user didn't ask for.
+      } finally {
+        // Re-arm only now. This is the in-flight guard: there is never more
+        // than one request outstanding, however slow the server gets.
+        schedule();
       }
     };
 
-    const id = setInterval(poll, MESSAGE_POLL_MS);
+    // Catch up immediately when the tab comes back, rather than showing stale
+    // messages until the next tick.
+    const onVisible = () => {
+      if (!document.hidden) {
+        clearTimeout(timer);
+        void poll();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    schedule();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [conversationId, scrollToBottom]);
 
   // ── Presence heartbeat, so the other side sees us online ────────────────
   useEffect(() => {
     const beat = () => {
+      // A hidden tab is not presence. Beating from one told the other side you
+      // were "Online" while the laptop was shut, and cost a write per beat.
+      if (document.hidden) return;
       void callGateway("presence.heartbeat").catch(() => {});
     };
     beat();

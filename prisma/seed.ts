@@ -85,6 +85,7 @@ async function main() {
   await prisma.report.deleteMany();
   await prisma.block.deleteMany();
   await prisma.message.deleteMany();
+  await prisma.conversationParticipant.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.dispute.deleteMany();
   await prisma.review.deleteMany();
@@ -563,6 +564,9 @@ async function main() {
   const conv1 = await prisma.conversation.create({
     data: {
       participantIds: convKey,
+      participants: {
+        create: [{ userId: business.id }, { userId: digital.id }],
+      },
       lastMessageAt: daysAgo(1),
       lastMessageText: "Sounds good — I'll send the staging link Thursday.",
       createdAt: daysAgo(10),
@@ -594,6 +598,9 @@ async function main() {
   const conv2 = await prisma.conversation.create({
     data: {
       participantIds: convKeyFor(customer.id, local.id),
+      participants: {
+        create: [{ userId: customer.id }, { userId: local.id }],
+      },
       lastMessageAt: daysAgo(4),
       lastMessageText: "I can come by Saturday morning to look at the wiring.",
       createdAt: daysAgo(5),
@@ -630,6 +637,9 @@ async function main() {
   const conv3 = await prisma.conversation.create({
     data: {
       participantIds: convKeyFor(business.id, pendingProvider.id),
+      participants: {
+        create: [{ userId: business.id }, { userId: pendingProvider.id }],
+      },
       lastMessageAt: daysAgo(6),
       lastMessageText:
         "Contact me directly on WhatsApp at 98xxxxxx to skip the platform fee.",

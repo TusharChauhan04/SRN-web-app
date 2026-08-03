@@ -23,6 +23,7 @@ async function wipe() {
   await prisma.referral.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.message.deleteMany();
+  await prisma.conversationParticipant.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.dispute.deleteMany();
   await prisma.review.deleteMany();
@@ -516,5 +517,46 @@ describe("booking lifecycle", () => {
     // Must go back to in_progress — marking it completed would fabricate an
     // outcome nobody agreed to.
     expect((await repo.bookings.findById(booking.id))?.status).toBe("in_progress");
+  });
+});
+
+describe("conversation participants", () => {
+  /**
+   * `listConversations` reads the join table, not the comma-joined string, so a
+   * conversation created without participant rows would be INVISIBLE to both
+   * people in it — with no error anywhere. That is the failure this pins.
+   */
+  it("writes participant rows whenever a thread is opened", async () => {
+    const a = await makeUser("cp-a");
+    const b = await makeUser("cp-b", "customer");
+
+    const { conversation } = await repo.messages.send({
+      senderId: a.id,
+      receiverId: b.id,
+      text: "first",
+    });
+
+    const rows = await prisma.conversationParticipant.findMany({
+      where: { conversationId: conversation.id },
+    });
+    expect(rows.map((r) => r.userId).sort()).toEqual([a.id, b.id].sort());
+
+    // And both sides can actually find it.
+    for (const user of [a, b]) {
+      const page = await repo.messages.listConversations(user.id);
+      expect(page.items.map((c) => c.id)).toContain(conversation.id);
+    }
+  });
+
+  it("does not leak a thread to someone who is not in it", async () => {
+    const a = await makeUser("cp-x");
+    const b = await makeUser("cp-y", "customer");
+    const outsider = await makeUser("cp-z", "business");
+
+    await repo.messages.send({ senderId: a.id, receiverId: b.id, text: "hi" });
+
+    const page = await repo.messages.listConversations(outsider.id);
+    expect(page.items).toHaveLength(0);
+    expect(page.total).toBe(0);
   });
 });

@@ -60,8 +60,21 @@ export async function getThread(
     otherId ? repo.presence.get(otherId) : Promise.resolve(null),
   ]);
 
-  // Reading a thread marks it read, as on mobile.
-  await repo.messages.markConversationRead(conversationId, actor.id);
+  /*
+   * Reading a thread marks it read, as on mobile — but only when there is
+   * something to mark.
+   *
+   * This ran unconditionally, so a poll every 5 seconds issued a WRITE on a
+   * read path whether or not any row matched: ~12 write transactions per minute
+   * per open tab, doing nothing. On SQLite, where there is one writer at a
+   * time, that put idle chat tabs in front of real traffic.
+   */
+  const hasUnreadInbound = page.items.some(
+    (m) => m.receiverId === actor.id && !m.read,
+  );
+  if (hasUnreadInbound) {
+    await repo.messages.markConversationRead(conversationId, actor.id);
+  }
 
   return {
     conversation,
