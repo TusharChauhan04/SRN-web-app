@@ -10,14 +10,14 @@
  * signature verification, replay guard and grant logic all execute exactly as
  * they will in production. It refuses to exist outside development.
  */
-import { NextResponse } from "next/server";
-import { z } from "zod";
 import {
   configuredPaymentProviderName,
+  paymentProvider,
   signMockWebhook,
 } from "@/lib/providers/payments/index.server";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { applyVerifiedPayment } from "@/lib/services/subscriptions.service";
-import { paymentProvider } from "@/lib/providers/payments/index.server";
 
 export const dynamic = "force-dynamic";
 

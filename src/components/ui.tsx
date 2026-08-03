@@ -5,6 +5,7 @@
  * src/constants/colors.ts, so the web app inherits the mobile visual identity
  * rather than looking like a default Next.js starter.
  */
+import { isSafeExternalUrl } from "@/lib/gateway/schemas";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { ROLE_COLORS, ROLE_LABELS, type UserRole } from "@/lib/repositories/types";
@@ -23,7 +24,7 @@ import { ROLE_COLORS, ROLE_LABELS, type UserRole } from "@/lib/repositories/type
  */
 export function safeHref(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
-  return /^https?:\/\//i.test(url.trim()) ? url : undefined;
+  return isSafeExternalUrl(url) ? url : undefined;
 }
 
 export function cn(...parts: (string | false | null | undefined)[]): string {

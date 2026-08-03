@@ -18,7 +18,7 @@ database.
    src/lib/repositories/index.ts        ← the swap point (one object literal)
               │
               ▼
-   src/lib/repositories/interfaces.ts   ← 21 interfaces, ~130 methods
+   src/lib/repositories/interfaces.ts   ← 22 interfaces, ~130 methods
               │
               ▼
    src/lib/repositories/prisma/*.ts     ← the ONLY code that knows about SQL

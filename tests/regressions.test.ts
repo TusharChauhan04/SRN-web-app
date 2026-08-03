@@ -560,3 +560,40 @@ describe("conversation participants", () => {
     expect(page.total).toBe(0);
   });
 });
+
+describe("participantIds and participant rows must agree", () => {
+  /**
+   * The same fact is held twice: `participantIds` (the comma-joined uniqueness
+   * key, which stops duplicate threads) and the ConversationParticipant rows
+   * (which serve lookups). Both are written in ONE place — but nothing enforces
+   * that pairing.
+   *
+   * If they ever diverge the symptom is silent and one-sided: listConversations
+   * reads the join table and returns nothing, while findConversationBetween
+   * reads the string and still finds the thread. A conversation that exists and
+   * is invisible, for one user, with no error anywhere. This makes that a
+   * failing test instead.
+   */
+  it("keeps participantIds and the participant rows in agreement", async () => {
+    const a = await makeUser("agree-a");
+    const b = await makeUser("agree-b", "customer");
+    const c = await makeUser("agree-c", "business");
+
+    await repo.messages.send({ senderId: a.id, receiverId: b.id, text: "1" });
+    await repo.messages.send({ senderId: c.id, receiverId: a.id, text: "2" });
+
+    const conversations = await prisma.conversation.findMany({
+      include: { participants: true },
+    });
+    expect(conversations.length).toBeGreaterThan(0);
+
+    for (const conversation of conversations) {
+      const fromString = conversation.participantIds
+        .split(",")
+        .filter(Boolean)
+        .sort();
+      const fromRows = conversation.participants.map((p) => p.userId).sort();
+      expect(fromRows, `conversation ${conversation.id}`).toEqual(fromString);
+    }
+  });
+});

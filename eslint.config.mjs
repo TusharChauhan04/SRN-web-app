@@ -213,7 +213,17 @@ export const LAYERS = [
      */
     name: "client-lib",
     files: ["src/lib/auth/**/*.{ts,tsx}"],
-    restrictions: [noRepositories, noPrisma, noServices, noProviderSdks],
+    // noServerProviders included deliberately: this layer exists BECAUSE a
+    // "use client" file was falling through, and the whole point is keeping
+    // server-only modules out of the browser bundle. Omitting it gave the
+    // highest-risk client file every restriction except the relevant one.
+    restrictions: [
+      noRepositories,
+      noPrisma,
+      noServices,
+      noProviderSdks,
+      noServerProviders,
+    ],
   },
   {
     /*
@@ -223,7 +233,7 @@ export const LAYERS = [
      * reach the data layer directly.
      */
     name: "api-routes",
-    files: ["src/app/api/**/*.ts"],
+    files: ["src/app/api/**/*.{ts,tsx}"],
     ignores: ["src/app/api/healthz/route.ts"],
     restrictions: [noRepositories, noPrisma, noProviderSdks],
   },
@@ -238,7 +248,7 @@ export const LAYERS = [
      * whole of its data access, and that stays swappable with everything else.
      */
     name: "healthz",
-    files: ["src/app/api/healthz/route.ts"],
+    files: ["src/app/api/healthz/route.{ts,tsx}"],
     restrictions: [noPrisma, noProviderSdks],
   },
   {
@@ -258,25 +268,25 @@ export const LAYERS = [
   },
   {
     name: "gateway",
-    files: ["src/lib/gateway/**/*.ts"],
+    files: ["src/lib/gateway/**/*.{ts,tsx}"],
     ignores: ["src/lib/gateway/core.ts", "src/lib/gateway/context.ts"],
     restrictions: [noRepositories, noPrisma, noProviderSdks],
   },
   {
     /* Providers are the bottom layer: they must not reach back up. */
     name: "providers",
-    files: ["src/lib/providers/**/*.ts"],
+    files: ["src/lib/providers/**/*.{ts,tsx}"],
     restrictions: [noRepositories, noPrisma, noServices],
   },
   {
     /* The one place Prisma is allowed. */
     name: "repositories-prisma",
-    files: ["src/lib/repositories/prisma/**/*.ts"],
+    files: ["src/lib/repositories/prisma/**/*.{ts,tsx}"],
     restrictions: [noServices, noProviderSdks],
   },
   {
     name: "db",
-    files: ["src/lib/db/**/*.ts"],
+    files: ["src/lib/db/**/*.{ts,tsx}"],
     restrictions: [noServices],
   },
   {

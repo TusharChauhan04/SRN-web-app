@@ -110,6 +110,26 @@ describe("layering rules are actually enforced", () => {
       code: `import { repo } from "@/lib/repositories";\nexport const x = repo;`,
     },
     {
+      /*
+       * The browser layer must carry the browser rule. This layer exists for a
+       * "use client" component, and was created with every restriction EXCEPT
+       * the one that keeps server-only modules out of the client bundle.
+       */
+      layer: "client-lib — server providers",
+      file: "src/lib/auth/Probe.tsx",
+      code: `import { storageProvider } from "@/lib/providers/storage/index.server";\nexport const x = storageProvider;`,
+    },
+    {
+      /*
+       * A `.tsx` in a directory whose layer glob was `.ts`-only. The sibling
+       * `ignores` are extension-agnostic, so such a file was carved out of the
+       * catch-all without being covered by its own layer — no restrictions.
+       */
+      layer: "tsx files do not fall through the globs",
+      file: "src/lib/providers/Probe.tsx",
+      code: `import { repo } from "@/lib/repositories";\nexport const x = repo;`,
+    },
+    {
       layer: "providers — reaching back up to services",
       file: "src/lib/providers/probe.ts",
       code: `import * as s from "@/lib/services/admin.service";\nexport const x = s;`,
@@ -192,6 +212,40 @@ describe("no source file falls through the layer globs", () => {
     }
     return acc;
   }
+
+  it("covers hypothetical .tsx files in every layer directory", async () => {
+    /*
+     * The sweep below only sees files that exist today, which is exactly why
+     * the `.tsx` fall-through was invisible to it: no `.tsx` happened to live
+     * in those directories yet, so the config's claim that "every file under
+     * src/ matches exactly one layer" was true of the tree and false of the
+     * rules. This checks the rules.
+     */
+    const hypothetical = [
+      "src/app/api/v1/x/route.tsx",
+      "src/app/api/healthz/helper.tsx",
+      "src/lib/providers/storage/x.tsx",
+      "src/lib/repositories/prisma/x.tsx",
+      "src/lib/db/x.tsx",
+      "src/lib/gateway/x.tsx",
+    ];
+
+    const uncovered: string[] = [];
+    for (const rel of hypothetical) {
+      const config = await eslint.calculateConfigForFile(path.join(ROOT, rel));
+      const rule = config.rules?.["@typescript-eslint/no-restricted-imports"];
+      const options = Array.isArray(rule) ? rule[1] : undefined;
+      const count =
+        (options?.paths?.length ?? 0) + (options?.patterns?.length ?? 0);
+      if (count === 0) uncovered.push(rel);
+    }
+
+    expect(
+      uncovered,
+      "A .tsx file added here would carry NO import restrictions:\n" +
+        uncovered.join("\n"),
+    ).toEqual([]);
+  });
 
   it("gives every file under src/ a non-empty restriction set", async () => {
     const files = sourceFiles(path.join(ROOT, "src"));
