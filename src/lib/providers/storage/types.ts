@@ -78,6 +78,16 @@ export interface StorageProvider {
    */
   getReadUrl(storageKey: string, context: UploadContext): Promise<string>;
 
+  /**
+   * Whether an object was actually written.
+   *
+   * `uploads.confirm` used to take the client's word for it: the browser could
+   * call prepare then confirm and never PUT a single byte, leaving a "confirmed"
+   * row pointing at nothing — a KYC submission an admin opens to find an empty
+   * document, or an avatar URL that 404s on every page that renders it.
+   */
+  exists(storageKey: string): Promise<boolean>;
+
   delete(storageKey: string): Promise<void>;
 }
 

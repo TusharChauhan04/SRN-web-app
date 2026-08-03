@@ -13,6 +13,7 @@ import "server-only";
  */
 import { repo } from "@/lib/repositories";
 import { notify } from "./notify.service";
+import { RepositoryConflictError } from "@/lib/repositories/authorize";
 import {
   CURRENCY,
   TIER_PRICES_MINOR,
@@ -147,10 +148,15 @@ export async function createCheckoutOrder(
     throw err;
   }
 
-  // Record the pending order WITHOUT granting anything — `pendingTier` is
-  // separate from `tier` precisely so opening checkout can't change what the
-  // user currently has.
-  await repo.subscriptions.createOrder(actor.id, tier, order.orderId);
+  // Record the order WITHOUT granting anything. The order row is what the
+  // webhook resolves the paid-for tier from, so opening (or abandoning) a
+  // checkout can never change what the user currently has.
+  await repo.subscriptions.createOrder(
+    actor.id,
+    tier,
+    order.orderId,
+    order.amountMinor,
+  );
 
   await repo.audit
     .record({
@@ -183,7 +189,14 @@ export async function applyVerifiedPayment(input: {
   orderId: string;
   paymentId: string;
   amountMinor: number | null;
-}): Promise<{ applied: boolean; reason?: string }> {
+}): Promise<{
+  applied: boolean;
+  reason?:
+    | "already_applied"
+    | "order_already_settled"
+    | "unknown_order"
+    | "amount_mismatch";
+}> {
   /*
    * Two idempotency guards, because they catch different failures.
    *
@@ -194,30 +207,97 @@ export async function applyVerifiedPayment(input: {
    *    payment id let the same order be granted twice, extending the paid
    *    period for free — caught by testing the replay rather than assuming it.
    */
-  const byPayment = await repo.subscriptions.findByPaymentId(input.paymentId);
+  const byPayment = await repo.subscriptions.findOrderByPaymentId(
+    input.paymentId,
+  );
   if (byPayment) {
     return { applied: false, reason: "already_applied" };
   }
 
-  const byOrder = await repo.subscriptions.findByOrderId(input.orderId);
-  if (byOrder?.razorpayPaymentId) {
+  const order = await repo.subscriptions.findOrderById(input.orderId);
+  if (order?.razorpayPaymentId) {
     console.warn(
       `[subscriptions] order ${input.orderId} already settled by payment ` +
-        `${byOrder.razorpayPaymentId}; ignoring ${input.paymentId}`,
+        `${order.razorpayPaymentId}; ignoring ${input.paymentId}`,
     );
     return { applied: false, reason: "order_already_settled" };
+  }
+
+  /*
+   * Distinguish "we do not know this order" from "the write failed".
+   *
+   * Both used to return applied:false with reason "unknown_order", which the
+   * webhook route answers with 200 — telling the provider it was handled. The
+   * provider's retry schedule is the only safety net for a transient failure,
+   * so swallowing one meant the customer was charged and never received the
+   * tier. An unknown order genuinely should not be retried; anything else must.
+   */
+  if (!order) {
+    console.warn(`[subscriptions] webhook for unknown order ${input.orderId}`);
+    return { applied: false, reason: "unknown_order" };
+  }
+
+  // The amount is re-derived from our own price list, so a webhook claiming a
+  // different figure means something is wrong upstream — do not grant on it.
+  /*
+   * The expected amount was frozen when the order was created, so a price
+   * change while an order was open cannot retroactively make a completed
+   * payment look wrong.
+   */
+  const expected = order.amountMinor;
+  if (input.amountMinor !== null) {
+    /*
+     * Underpayment must never grant a tier.
+     *
+     * Razorpay binds the amount to the order today, so this is belt-and-braces
+     * — but the enforcement currently lives ENTIRELY in the third party, and it
+     * stops holding the moment partial_payment is enabled, a second provider is
+     * added, or a price changes while orders are open. This is the last check
+     * before an entitlement is granted, so it does the check itself.
+     *
+     * Overpayment is allowed through: the customer is not harmed, and refusing
+     * would strand money that was genuinely received.
+     */
+    if (input.amountMinor < expected) {
+      console.error(
+        `[subscriptions] underpayment on ${input.orderId}: paid ` +
+          `${input.amountMinor}, ${order.tier} costs ${expected}`,
+      );
+      return { applied: false, reason: "amount_mismatch" };
+    }
   }
 
   const periodEnd = new Date();
   periodEnd.setMonth(periodEnd.getMonth() + 1);
 
+  let subscription;
   try {
-    const subscription = await repo.subscriptions.activateFromPayment(
+    subscription = await repo.subscriptions.activateFromPayment(
       input.orderId,
       input.paymentId,
       periodEnd,
     );
+  } catch (err) {
+    /*
+     * Lost the race to settle this order.
+     *
+     * The replay checks above are reads, so two simultaneous deliveries both
+     * pass them; the conditional settle inside the transaction is what actually
+     * decides. Losing it means the order IS settled, which is a decided
+     * outcome — acknowledge it (200) rather than letting it become a 500 the
+     * provider retries forever. Every other failure propagates, so a genuine
+     * transient error still gets retried.
+     */
+    if (err instanceof RepositoryConflictError) {
+      console.warn(
+        `[subscriptions] concurrent settle lost for ${input.orderId}`,
+      );
+      return { applied: false, reason: "order_already_settled" };
+    }
+    throw err;
+  }
 
+  {
     await notify({
         userId: subscription.userId,
         type: "subscription_active",
@@ -239,12 +319,9 @@ export async function applyVerifiedPayment(input: {
       .catch(() => {});
 
     return { applied: true };
-  } catch (err) {
-    // An unknown order id is not our bug to crash on — log it and acknowledge,
-    // or the provider will retry forever.
-    console.error("[subscriptions] could not apply payment", err);
-    return { applied: false, reason: "unknown_order" };
   }
+  // Anything thrown from here propagates deliberately: the webhook route turns
+  // it into a non-2xx so the provider retries.
 }
 
 export async function cancelAtPeriodEnd(actor: User): Promise<Subscription> {

@@ -9,6 +9,7 @@ import "server-only";
  */
 import { repo } from "@/lib/repositories";
 import { notify } from "./notify.service";
+import { RepositoryConflictError } from "@/lib/repositories/authorize";
 import type {
   Booking,
   BookingStatus,
@@ -45,42 +46,45 @@ export async function acceptQuote(
   }
 
   const requirement = await repo.requirements.findById(quote.requirementId);
-  if (requirement && requirement.status !== "open") {
+  // A null requirement used to skip the status check entirely and book anyway.
+  if (!requirement) throw GatewayError.notFound("Requirement not found");
+  if (requirement.status !== "open") {
     throw GatewayError.conflict(
       "This requirement already has an accepted quote.",
     );
   }
 
-  const booking = await repo.bookings.create({
-    quoteId: quote.id,
-    requirementId: quote.requirementId,
-    customerId: actor.id,
-    providerId: quote.senderId,
-    amount: quote.amount,
-  });
-
-  await repo.quotes.updateStatus(quote.id, "accepted");
-  // The requirement is spoken for; it must stop accepting new bids.
-  await repo.requirements.updateStatus(quote.requirementId, "in_progress");
-
-  // Close out the losing bids so their authors aren't left waiting.
-  const others = await repo.quotes.list({
-    requirementId: quote.requirementId,
-    limit: 100,
-  });
-  await Promise.all(
-    others.items
-      .filter((q) => q.id !== quote.id && q.status !== "rejected")
-      .map((q) => repo.quotes.updateStatus(q.id, "rejected").catch(() => {})),
-  );
+  /*
+   * The four writes happen atomically in the repository, and the requirement
+   * claim inside it is the real concurrency gate — the check above is a fast
+   * path for the common case, not the guard. Accepting two different bids in
+   * the same instant previously produced two bookings and two committed
+   * providers, and a failure partway left an orphan booking that made the
+   * quote permanently unacceptable.
+   */
+  let booking: Booking;
+  try {
+    booking = await repo.bookings.createFromAcceptedQuote({
+      quoteId: quote.id,
+      requirementId: quote.requirementId,
+      customerId: actor.id,
+      providerId: quote.senderId,
+      amount: quote.amount,
+    });
+  } catch (err) {
+    if (err instanceof RepositoryConflictError) {
+      throw GatewayError.conflict(err.message);
+    }
+    throw err;
+  }
 
   await notify({
-      userId: quote.senderId,
-      type: "quote_accepted",
-      title: "Your quote was accepted",
-      body: `${actor.name} accepted your quote. The booking is confirmed.`,
-      data: { bookingId: booking.id },
-    });
+    userId: quote.senderId,
+    type: "quote_accepted",
+    title: "Your quote was accepted",
+    body: `${actor.name} accepted your quote. The booking is confirmed.`,
+    data: { bookingId: booking.id },
+  });
 
   await repo.audit
     .record({
@@ -145,12 +149,22 @@ export async function updateBookingStatus(
 
   const updated = await repo.bookings.updateStatus(bookingId, status);
 
+  if (booking.requirementId) {
+    if (status === "completed") {
+      await repo.requirements
+        .updateStatus(booking.requirementId, "closed")
+        .catch(() => {});
+    } else if (status === "cancelled") {
+      // Reopen rather than strand it. A cancelled booking used to leave the
+      // requirement in_progress permanently — no new bids, not deletable, and
+      // only a manual status change recovered it.
+      await repo.requirements
+        .updateStatus(booking.requirementId, "open")
+        .catch(() => {});
+    }
+  }
+
   if (status === "completed") {
-    await repo.requirements
-      .updateStatus(booking.requirementId ?? "", "closed")
-      .catch(() => {
-        // Direct bookings have no requirement; nothing to close.
-      });
     await notify({
         userId: booking.customerId,
         type: "booking_completed",

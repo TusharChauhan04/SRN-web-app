@@ -37,6 +37,24 @@ class ConsoleEmailProvider implements EmailProvider {
   readonly name = "console";
   readonly isConfigured = true;
 
+  constructor() {
+    /*
+     * Refuse to exist in production, matching the other development providers.
+     *
+     * Preflight only warns about this, and the warning understates it: these
+     * bodies carry notification content — someone's message text, quote
+     * amounts, dispute details — straight into the server log, where log
+     * shipping and retention were never designed to hold personal data.
+     */
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "The console email provider cannot be used in production: it writes " +
+          "notification bodies to the server log instead of sending them. " +
+          "Configure EMAIL_PROVIDER and a real mail vendor.",
+      );
+    }
+  }
+
   async send(message: EmailMessage): Promise<void> {
     console.log(
       `[email] to=${message.to} subject="${message.subject}"\n${message.body}`,

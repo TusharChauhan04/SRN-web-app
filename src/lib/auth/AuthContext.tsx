@@ -164,7 +164,8 @@ export function AuthProvider({
     try {
       // Clear the server session first: if the page reloads mid-sign-out, the
       // server must not still consider it valid.
-      await callGateway("auth.destroySession", { cookieValue: null });
+      // No payload: the server revokes the session it verified for this request.
+      await callGateway("auth.destroySession");
       await authClient().signOut();
       router.replace("/login");
       router.refresh();

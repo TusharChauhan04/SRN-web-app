@@ -90,23 +90,55 @@ export function checkConfiguration(
     }
   }
 
-  if (isProduction && (env.STORAGE_PROVIDER ?? "local") === "local") {
+  /*
+   * Check the RESOLVED provider, not the raw string.
+   *
+   * This used to compare `env.STORAGE_PROVIDER ?? "local"` against "local",
+   * which passed for any unrecognised value — so `STORAGE_PROVIDER=firebse`
+   * reported "configuration looks deployable" while the app ran on local disk.
+   * Note this deliberately does NOT mirror the factory exactly: for an unknown
+   * value the factory resolves to "firebase" (so it fails loudly on a missing
+   * bucket), while preflight treats unknown as unusable and reports it. Both
+   * fail closed; they just say so differently. What matters is that neither
+   * path can quietly end up on local disk.
+   */
+  const storage = (env.STORAGE_PROVIDER ?? "").toLowerCase();
+  const resolvedStorage = storage === "firebase" ? "firebase" : "local";
+  if (isProduction && resolvedStorage === "local") {
     problems.push({
       severity: "fatal",
       setting: "STORAGE_PROVIDER",
       message:
-        "Local file storage in production. Uploads — including KYC identity " +
-        "documents — are written to an ephemeral per-instance disk and lost.",
+        storage && storage !== "local"
+          ? `Unrecognised value "${env.STORAGE_PROVIDER}" — the only supported ` +
+            "values are 'local' and 'firebase'. Check the spelling."
+          : "Local file storage in production. Uploads — including KYC identity " +
+            "documents — are written to an ephemeral per-instance disk and lost.",
+    });
+  }
+
+  if (isProduction && !env.STORAGE_SIGNING_SECRET) {
+    problems.push({
+      severity: "fatal",
+      setting: "STORAGE_SIGNING_SECRET",
+      message:
+        "Unset. Signed URLs for KYC documents would be signed with a random " +
+        "per-process key, so a link minted by one instance is rejected by the " +
+        "next — and every outstanding link dies on each deploy.",
     });
   }
 
   if (isProduction && (env.EMAIL_PROVIDER ?? "console") === "console") {
     problems.push({
-      severity: "warning",
+      // Fatal, not a warning: the console provider now REFUSES to construct in
+      // production, so this would be a runtime crash on the first notification
+      // rather than a degraded feature. Preflight should say so before deploy.
+      severity: "fatal",
       setting: "EMAIL_PROVIDER",
       message:
-        "Email is logged, not sent. The notification preference offers email " +
-        "delivery that will not happen.",
+        "Email would be logged, not sent — and notification bodies carry " +
+        "personal data into the server log. The console provider refuses to " +
+        "run in production; configure a real mail vendor.",
     });
   }
 

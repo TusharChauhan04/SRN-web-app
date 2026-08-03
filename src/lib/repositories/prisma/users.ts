@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/db/client";
-import { assertAdmin, assertSelfOrAdmin, type Actor } from "../authorize";
+import {
+  RepositoryConflictError,
+  assertAdmin,
+  assertSelfOrAdmin,
+  type Actor,
+} from "../authorize";
 import type {
   CreateUserInput,
   ListUsersFilter,
@@ -88,6 +93,31 @@ export class PrismaUserRepository implements UserRepository {
   }
 
   async update(id: string, input: UpdateUserInput): Promise<User> {
+    try {
+      return await this.updateUnguarded(id, input);
+    } catch (err) {
+      /*
+       * `phone` is unique across accounts, so a number already verified
+       * elsewhere lands here as a constraint violation rather than a friendly
+       * message. Translate it; anything else is a real failure and propagates.
+       */
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        (err as { code?: string }).code === "P2002"
+      ) {
+        throw new RepositoryConflictError(
+          "That phone number is already linked to another account.",
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async updateUnguarded(
+    id: string,
+    input: UpdateUserInput,
+  ): Promise<User> {
     const row = await prisma.user.update({
       where: { id },
       data: {
@@ -285,6 +315,17 @@ export class PrismaUserRepository implements UserRepository {
         data: { comment: null },
       }),
       prisma.portfolioItem.deleteMany({ where: { userId: id } }),
+      /*
+       * The raw phone number lives here too, in plaintext.
+       *
+       * Nulling `User.phone` alone left it behind for anyone who had a
+       * challenge outstanding or never finished verification — the admin UI
+       * reported the account erased while the number was still in the database.
+       */
+      prisma.phoneVerification.deleteMany({ where: { userId: id } }),
+      // Browsing history: who this person looked at is personal data too.
+      prisma.profileView.deleteMany({ where: { viewerId: id } }),
+      prisma.presence.deleteMany({ where: { userId: id } }),
       // Upload rows go last so the caller can read storageKeys first.
       prisma.upload.deleteMany({ where: { userId: id } }),
     ]);

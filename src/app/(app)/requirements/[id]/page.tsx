@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { gateway, GatewayError } from "@/lib/gateway";
+import { gateway, GatewayError, BIDS_PAGE_SIZE } from "@/lib/gateway";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   Avatar,
@@ -34,26 +34,57 @@ export const metadata = { title: "Requirement — SRN" };
  */
 export default async function RequirementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; bids?: string }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const { id } = await params;
+  const [{ id }, { error: actionError, bids }] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+
+  // 1-based in the URL because that is what a reader expects; the service
+  // takes an offset.
+  const bidsPage = Math.max(1, Number(bids) || 1);
 
   let data;
   try {
-    data = await gateway.requirements.detail({ id });
+    data = await gateway.requirements.detail({
+      id,
+      bidsOffset: (bidsPage - 1) * BIDS_PAGE_SIZE,
+    });
   } catch (err) {
     if (err instanceof GatewayError && err.code === "not_found") notFound();
     throw err;
   }
 
-  const { requirement, quotes, isOwner, myQuote, canBid } = data;
+  const {
+    requirement,
+    quotes,
+    quotesTotal,
+    quotesOffset,
+    isOwner,
+    myQuote,
+    canBid,
+  } = data;
+
+  const hasPrev = quotesOffset > 0;
+  const hasNext = quotesOffset + quotes.length < quotesTotal;
 
   return (
     <>
+      {actionError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-[var(--destructive)] bg-[var(--destructive)]/10 px-4 py-3 text-sm text-[var(--destructive)]"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <PageHeader
         title={requirement.title}
         description={`${requirement.category}${requirement.location ? ` · ${requirement.location}` : ""} · posted ${formatRelative(requirement.createdAt)}`}
@@ -93,7 +124,7 @@ export default async function RequirementDetailPage({
           {isOwner ? (
             <Card>
               <CardHeader
-                title={`Quotes (${quotes.length})`}
+                title={`Quotes (${quotesTotal})`}
                 description="Shortlist the ones you like, then accept one to create a booking."
               />
               {quotes.length === 0 ? (
@@ -189,6 +220,35 @@ export default async function RequirementDetailPage({
                   ))}
                 </ul>
               )}
+
+              {hasPrev || hasNext ? (
+                <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] p-4">
+                  <p className="text-sm text-[var(--muted-foreground)]">
+                    Showing {quotesOffset + 1}&ndash;{quotesOffset + quotes.length} of{" "}
+                    {quotesTotal}
+                  </p>
+                  <div className="flex gap-2">
+                    {hasPrev ? (
+                      <ButtonLink
+                        size="sm"
+                        variant="outline"
+                        href={`/requirements/${id}?bids=${bidsPage - 1}`}
+                      >
+                        Previous
+                      </ButtonLink>
+                    ) : null}
+                    {hasNext ? (
+                      <ButtonLink
+                        size="sm"
+                        variant="outline"
+                        href={`/requirements/${id}?bids=${bidsPage + 1}`}
+                      >
+                        Next
+                      </ButtonLink>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </Card>
           ) : myQuote ? (
             <Card>

@@ -1,22 +1,20 @@
 /**
  * Signed read for private objects — KYC documents and dispute evidence.
  *
- * These are identity documents. They are never served from the public
- * /uploads path; the signature is short-lived and minted only by
+ * These are identity documents. The upload root sits outside the web root, so
+ * this route is the ONLY way to reach them; the signature is short-lived and minted only by
  * `storageProvider().getReadUrl()`, which the services call for the specific
  * user allowed to see them.
  */
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import {
   configuredStorageProviderName,
+  resolveLocalPath,
   verifyStorageSignature,
 } from "@/lib/providers/storage/index.server";
 
 export const dynamic = "force-dynamic";
-
-const LOCAL_ROOT = path.join(process.cwd(), "public", "uploads");
 
 const CONTENT_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
@@ -39,23 +37,19 @@ export async function GET(req: Request) {
   if (!key || !sig || !Number.isFinite(expires)) {
     return NextResponse.json({ error: { message: "Bad request" } }, { status: 400 });
   }
-  if (!verifyStorageSignature(key, expires, sig)) {
+  // "get" — see the matching note in the upload route.
+  if (!verifyStorageSignature(key, expires, sig, "get")) {
     return NextResponse.json(
       { error: { message: "This link is invalid or has expired" } },
       { status: 403 },
     );
   }
 
-  // Last line before a filesystem read — keys are server-generated, but this
-  // does not assume that.
-  const resolved = path.resolve(LOCAL_ROOT, key);
-  if (!resolved.startsWith(LOCAL_ROOT + path.sep)) {
-    return NextResponse.json({ error: { message: "Bad request" } }, { status: 400 });
-  }
-
   let bytes: Buffer;
   try {
-    bytes = await readFile(resolved);
+    // resolveLocalPath is the traversal guard, shared with the writer so the
+    // two can never disagree about where the root is.
+    bytes = await readFile(resolveLocalPath(key));
   } catch {
     return NextResponse.json({ error: { message: "Not found" } }, { status: 404 });
   }

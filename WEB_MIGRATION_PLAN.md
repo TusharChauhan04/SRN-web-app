@@ -25,8 +25,8 @@ Auth and payments are pluggable providers with working local implementations,
 so the app runs with no third-party credentials. See README "Connecting real
 services".
 
-**Next step:** Phase 7 — confirm or revisit the web-push deferral — then
-Phase 8's deployment checklist, then the full review and audit.
+**Next step:** Phase 9 — the full review and audit — is in progress. Findings
+and their resolutions are recorded in §10 below.
 
 **Regression safety:** `scripts/smoke.ps1` checks ~40 route and gateway
 responses across anonymous / provider / admin. Capture it before a risky

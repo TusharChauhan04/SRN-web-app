@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { externalUrl } from "../schemas";
 import { defineOperation } from "../core";
 import * as provider from "@/lib/services/provider.service";
 import * as subs from "@/lib/services/subscriptions.service";
@@ -22,8 +23,8 @@ export const addPortfolioItem = defineOperation({
   input: z.object({
     title: z.string().trim().min(2).max(120),
     description: z.string().trim().max(1000).optional(),
-    imageUrl: z.string().max(500).optional(),
-    projectUrl: z.string().url().max(500).optional(),
+    imageUrl: externalUrl.optional(),
+    projectUrl: externalUrl.optional(),
   }),
   handler: (input, { user }) => provider.addPortfolioItem(user, input),
 });
@@ -36,7 +37,7 @@ export const updatePortfolioItem = defineOperation({
     id: z.string().min(1),
     title: z.string().trim().min(2).max(120).optional(),
     description: z.string().trim().max(1000).optional(),
-    projectUrl: z.string().url().max(500).optional(),
+    projectUrl: externalUrl.optional(),
   }),
   handler: ({ id, ...rest }, { user }) =>
     provider.updatePortfolioItem(user, id, rest),

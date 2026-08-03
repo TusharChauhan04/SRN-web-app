@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { externalUrl } from "../schemas";
 import { defineOperation } from "../core";
 import * as svc from "@/lib/services/bookings.service";
 
@@ -83,7 +84,7 @@ export const raiseDispute = defineOperation({
     bookingId: z.string().min(1),
     reason: z.string().trim().min(3).max(120),
     details: z.string().trim().min(20, "Explain what went wrong").max(5000),
-    evidenceUrls: z.array(z.string().url().max(500)).max(10).optional(),
+    evidenceUrls: z.array(externalUrl).max(10).optional(),
   }),
   handler: (input, { user }) => svc.raiseDispute(user, input),
 });

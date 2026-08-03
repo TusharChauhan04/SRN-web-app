@@ -39,8 +39,8 @@ export const gateway = {
   auth: {
     createSession: (input: { credential: string }) =>
       invoke(auth.createSession, input),
-    destroySession: (input: { cookieValue: string | null }) =>
-      invoke(auth.destroySession, input),
+    // No input — the session is read from the verified request context.
+    destroySession: () => invoke(auth.destroySession, undefined),
     completeOnboarding: (input: CompleteOnboardingInput) =>
       invoke(auth.completeOnboarding, input),
     me: () => invoke(auth.me, undefined),
@@ -285,3 +285,12 @@ export { getOperation, invoke, registeredOperationNames } from "./core";
 export { getContext } from "./context";
 export { GatewayError } from "./types";
 export type { GatewayErrorBody, GatewayErrorCode } from "./types";
+
+/**
+ * Page size for the owner's bid list.
+ *
+ * Re-exported here because pages may not import a service directly — the
+ * gateway is the boundary — but the requirement detail page needs it to
+ * translate a `?bids=N` page number into an offset.
+ */
+export { BIDS_PAGE_SIZE } from "@/lib/services/requirements.service";

@@ -221,6 +221,22 @@ on write. They can drift if rows are modified outside the repository layer —
 another reason for the no-direct-Prisma rule.
 `ReviewRepository.recomputeSubjectRating` is the repair path for ratings.
 
+**Some constraints are enforced by the database, not only by code.** These are
+the ones a swap must preserve, because the application relies on the violation
+being raised:
+
+| Constraint | Why it exists | Code that depends on it |
+|---|---|---|
+| `User.phone` unique | One phone number, one account. Without it a single number verifies unlimited accounts, the verified badge is meaningless, and a suspended user has a route back in. | `UserRepository.update` translates `P2002` into a conflict |
+| `Quote(requirementId, senderId)` unique | One live bid per provider per requirement. The service checks first, but check-then-insert is not atomic — a double-clicked submit inserts twice. | `QuoteRepository.create` translates `P2002` |
+| `SubscriptionOrder.id` primary key + conditional settle | The atomic gate that makes a duplicate payment webhook safe. | `activateFromPayment` claims via `updateMany ... where razorpayPaymentId: null` |
+| `Conversation.participantIds` unique | Two people opening a thread simultaneously get one thread, not two. | `MessageRepository.send` catches the create failure |
+
+If you move to Postgres these all carry over unchanged. If you move to a store
+without unique constraints (most document databases), **the guards above stop
+working silently** — the `P2002` translation simply never fires, and the races
+come back. That is the single most important thing to check when swapping.
+
 **Seeded user ids are not Firebase uids.** Firebase Auth owns identity; the
 `User.id` column is the Firebase uid for real accounts. Seeded rows use
 `seed-*` ids, so signing in with a real Google account creates a *separate*

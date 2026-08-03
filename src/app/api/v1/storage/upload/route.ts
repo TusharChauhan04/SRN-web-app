@@ -9,10 +9,12 @@
  * nothing else changes, because callers only ever see `uploadUrl`.
  */
 import { NextResponse } from "next/server";
+import { access } from "node:fs/promises";
 import { UPLOAD_RULES, type UploadContext } from "@/lib/providers/storage/types";
 import {
   configuredStorageProviderName,
   localStorageWriter,
+  resolveLocalPath,
   verifyStorageSignature,
 } from "@/lib/providers/storage/index.server";
 
@@ -35,9 +37,29 @@ export async function PUT(req: Request) {
   if (!key || !sig || !Number.isFinite(expires)) {
     return reject("Missing upload parameters", 400);
   }
-  if (!verifyStorageSignature(key, expires, sig)) {
+  // "put" — a READ signature must not authorise a write. An admin's KYC review
+  // link would otherwise double as permission to overwrite that document.
+  if (!verifyStorageSignature(key, expires, sig, "put")) {
     // Covers both a forged signature and an expired one.
     return reject("This upload link is invalid or has expired", 403);
+  }
+
+  /*
+   * Write ONCE per key.
+   *
+   * The signature stays valid for 15 minutes, and `submitKyc` stores the KEY,
+   * not the bytes — the admin reviewer fetches whatever is at that key at
+   * review time. Without this check an applicant could upload a clean document,
+   * submit it, then re-PUT a different file to the same URL and be approved
+   * against a document nobody ever reviewed (or destroy the evidence behind a
+   * rejection). Keys carry a uuid, so a legitimate re-upload is a new key.
+   */
+  const alreadyWritten = await access(resolveLocalPath(key)).then(
+    () => true,
+    () => false,
+  );
+  if (alreadyWritten) {
+    return reject("This upload link has already been used", 409);
   }
 
   // The key's first segment is the context, set server-side when signing.

@@ -8,6 +8,7 @@ import "server-only";
  * whether they may touch this particular row is this layer's job.
  */
 import { repo } from "@/lib/repositories";
+import { RepositoryConflictError } from "@/lib/repositories/authorize";
 import { notify } from "./notify.service";
 import {
   isProviderRole,
@@ -101,12 +102,25 @@ export interface RequirementDetail {
   requirement: Requirement;
   /** Quotes, visible only to the owner or to the provider who wrote them. */
   quotes: Quote[];
+  /**
+   * How many bids exist in total, which is NOT `quotes.length` once there are
+   * more than a page of them. The owner's view is paginated, so the page needs
+   * the real count to say "showing 20 of 340" and to render the pager.
+   */
+  quotesTotal: number;
+  /** Zero-based page of bids this response represents. */
+  quotesOffset: number;
+  /** Page size used, so the caller doesn't have to know the default. */
+  quotesLimit: number;
   /** True when the caller posted this requirement. */
   isOwner: boolean;
   /** The caller's own quote, if they already bid. */
   myQuote: Quote | null;
   canBid: boolean;
 }
+
+/** Bids per page on the requirement detail screen. */
+export const BIDS_PAGE_SIZE = 20;
 
 /**
  * A requirement plus whatever the caller is allowed to see of its bids.
@@ -118,6 +132,7 @@ export interface RequirementDetail {
 export async function getRequirementDetail(
   actor: User,
   requirementId: string,
+  bidsOffset = 0,
 ): Promise<RequirementDetail> {
   const requirement = await repo.requirements.findById(requirementId);
   if (!requirement) throw GatewayError.notFound("Requirement not found");
@@ -125,10 +140,27 @@ export async function getRequirementDetail(
   const isOwner = requirement.creatorId === actor.id;
 
   if (isOwner) {
-    const quotes = await repo.quotes.list({ requirementId, limit: 100 });
+    /*
+     * PAGINATED, with the true total alongside.
+     *
+     * The cap used to be a flat 100 with no total and no pager, so bid 101 was
+     * simply invisible to the one person who must see every bid. Raising the
+     * limit was not the fix: `normalizePageParams` clamps any request to
+     * MAX_PAGE_LIMIT, so asking for more returned the same 100 rows — and
+     * rendering thousands of bid cards on one page is its own problem. Real
+     * paging is the answer, and `total` is what makes it honest.
+     */
+    const quotes = await repo.quotes.list({
+      requirementId,
+      limit: BIDS_PAGE_SIZE,
+      offset: bidsOffset,
+    });
     return {
       requirement,
       quotes: quotes.items,
+      quotesTotal: quotes.total ?? quotes.items.length,
+      quotesOffset: bidsOffset,
+      quotesLimit: BIDS_PAGE_SIZE,
       isOwner: true,
       myQuote: null,
       canBid: false,
@@ -146,6 +178,11 @@ export async function getRequirementDetail(
     requirement,
     // Deliberately empty: a bidder must not see who else bid or for how much.
     quotes: myQuote ? [myQuote] : [],
+    // A bidder is shown only their own bid, so there is nothing to page
+    // through — and the real bid count is information they must not have.
+    quotesTotal: myQuote ? 1 : 0,
+    quotesOffset: 0,
+    quotesLimit: BIDS_PAGE_SIZE,
     isOwner: false,
     myQuote,
     canBid:
@@ -229,14 +266,24 @@ export async function submitQuote(
     throw GatewayError.conflict("You've already bid on this requirement.");
   }
 
-  const quote = await repo.quotes.create({
-    requirementId: input.requirementId,
-    senderId: actor.id,
-    receiverId: requirement.creatorId,
-    amount: input.amount,
-    durationDays: input.durationDays,
-    message: input.message,
-  });
+  let quote;
+  try {
+    quote = await repo.quotes.create({
+      requirementId: input.requirementId,
+      senderId: actor.id,
+      receiverId: requirement.creatorId,
+      amount: input.amount,
+      durationDays: input.durationDays,
+      message: input.message,
+    });
+  } catch (err) {
+    // Lost the race against a concurrent submission from the same provider —
+    // same outcome as the check above, just decided by the database.
+    if (err instanceof RepositoryConflictError) {
+      throw GatewayError.conflict(err.message);
+    }
+    throw err;
+  }
 
   // Tell the owner. Best effort — a failed notification must not lose the bid.
   await notify({

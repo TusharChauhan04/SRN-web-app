@@ -29,6 +29,7 @@ import type {
   RequirementStatus,
   Review,
   Subscription,
+  SubscriptionOrder,
   SubscriptionTier,
   Upload,
   UploadContext,
@@ -123,6 +124,7 @@ import type {
   Requirement as PrismaRequirement,
   Review as PrismaReview,
   Subscription as PrismaSubscription,
+  SubscriptionOrder as PrismaSubscriptionOrder,
   Upload as PrismaUpload,
   User as PrismaUser,
   VerificationRequest as PrismaVerificationRequest,
@@ -514,6 +516,20 @@ export function toBlockedDate(row: PrismaBlockedDate): BlockedDate {
     userId: row.userId as string,
     date: row.date as Date,
     reason: (row.reason as string | null) ?? null,
+  };
+}
+
+export function toSubscriptionOrder(
+  row: PrismaSubscriptionOrder,
+): SubscriptionOrder {
+  return {
+    id: row.id,
+    userId: row.userId,
+    tier: row.tier as SubscriptionTier,
+    amountMinor: row.amountMinor,
+    razorpayPaymentId: row.razorpayPaymentId ?? null,
+    settledAt: row.settledAt ?? null,
+    createdAt: row.createdAt,
   };
 }
 

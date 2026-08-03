@@ -3,6 +3,9 @@ import { repo } from "@/lib/repositories";
 import { prisma } from "@/lib/db/client";
 import { SYSTEM_ACTOR } from "@/lib/repositories/authorize";
 import type { User } from "@/lib/repositories/types";
+import { applyVerifiedPayment } from "@/lib/services/subscriptions.service";
+import { applyReferralCode } from "@/lib/services/referrals.service";
+import { TIER_PRICES_MINOR } from "@/lib/providers/payments/index.server";
 
 /**
  * Regression tests for bugs that were actually found in this codebase.
@@ -27,6 +30,7 @@ async function wipe() {
   await prisma.quote.deleteMany();
   await prisma.requirement.deleteMany();
   await prisma.verificationRequest.deleteMany();
+  await prisma.subscriptionOrder.deleteMany();
   await prisma.subscription.deleteMany();
   await prisma.user.deleteMany();
 }
@@ -48,46 +52,117 @@ async function makeUser(
 beforeEach(wipe);
 
 describe("payment webhook idempotency", () => {
-  /**
-   * Found by testing the replay guard and discovering it did NOT hold: the
-   * guard was on paymentId, so a second webhook carrying a DIFFERENT payment id
-   * for the same order granted the tier twice and extended the paid period for
-   * free.
+  /*
+   * These go through `applyVerifiedPayment` — the SERVICE — on purpose.
+   *
+   * An earlier version of this suite called the repository directly and then
+   * asserted that the stored row looked right. That asserted nothing: it never
+   * replayed a webhook, so deleting the entire order-level guard would have
+   * left the suite green. The guards live in the service and in the settle
+   * transaction, so the replay has to actually be delivered.
    */
-  it("grants a tier once, even when a second webhook carries a new payment id", async () => {
-    const user = await makeUser("payer");
-    await repo.subscriptions.createOrder(user.id, "elite", "order_1");
+  const ELITE = TIER_PRICES_MINOR.elite;
+  const PRO = TIER_PRICES_MINOR.pro;
 
-    const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await repo.subscriptions.activateFromPayment("order_1", "pay_1", periodEnd);
+  it("ignores a replay that carries a NEW payment id for a settled order", async () => {
+    const user = await makeUser("payer");
+    await repo.subscriptions.createOrder(user.id, "elite", "order_1", ELITE);
+
+    const first = await applyVerifiedPayment({
+      orderId: "order_1",
+      paymentId: "pay_1",
+      amountMinor: ELITE,
+    });
+    expect(first.applied).toBe(true);
 
     const afterFirst = await repo.subscriptions.findByUserId(user.id);
     expect(afterFirst?.tier).toBe("elite");
-    expect(afterFirst?.status).toBe("active");
+    const periodEndAfterFirst = afterFirst?.currentPeriodEnd?.getTime();
+    expect(periodEndAfterFirst).toBeDefined();
 
-    // Same payment id — a provider retry.
-    expect(await repo.subscriptions.findByPaymentId("pay_1")).not.toBeNull();
+    // THE REPLAY: same order, different payment id. This is the delivery that
+    // used to grant the tier a second time and extend the paid period for free.
+    const replay = await applyVerifiedPayment({
+      orderId: "order_1",
+      paymentId: "pay_2",
+      amountMinor: ELITE,
+    });
+    expect(replay.applied).toBe(false);
+    expect(replay.reason).toBe("order_already_settled");
 
-    // Different payment id, SAME order — the case that used to double-grant.
-    const settled = await repo.subscriptions.findByOrderId("order_1");
-    expect(settled?.razorpayPaymentId).toBe("pay_1");
+    const afterReplay = await repo.subscriptions.findByUserId(user.id);
+    // The period must NOT have moved. This is the assertion that fails if the
+    // order-level guard is removed.
+    expect(afterReplay?.currentPeriodEnd?.getTime()).toBe(periodEndAfterFirst);
+  });
+
+  it("ignores a provider retry that reuses the same payment id", async () => {
+    const user = await makeUser("retried");
+    await repo.subscriptions.createOrder(user.id, "pro", "order_retry", PRO);
+
+    await applyVerifiedPayment({
+      orderId: "order_retry",
+      paymentId: "pay_same",
+      amountMinor: PRO,
+    });
+    const before = await repo.subscriptions.findByUserId(user.id);
+
+    const retry = await applyVerifiedPayment({
+      orderId: "order_retry",
+      paymentId: "pay_same",
+      amountMinor: PRO,
+    });
+    expect(retry.applied).toBe(false);
+    expect(retry.reason).toBe("already_applied");
+
+    const after = await repo.subscriptions.findByUserId(user.id);
+    expect(after?.currentPeriodEnd?.getTime()).toBe(
+      before?.currentPeriodEnd?.getTime(),
+    );
+  });
+
+  it("refuses to grant a tier for an order it does not know", async () => {
+    const result = await applyVerifiedPayment({
+      orderId: "order_never_created",
+      paymentId: "pay_x",
+      amountMinor: ELITE,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.reason).toBe("unknown_order");
+  });
+
+  it("refuses to grant a tier when less was paid than the order was for", async () => {
+    const user = await makeUser("underpayer");
+    await repo.subscriptions.createOrder(user.id, "elite", "order_cheap", ELITE);
+
+    const result = await applyVerifiedPayment({
+      orderId: "order_cheap",
+      paymentId: "pay_cheap",
+      // Paid the pro price for an elite order.
+      amountMinor: PRO,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.reason).toBe("amount_mismatch");
+
+    const subscription = await repo.subscriptions.findByUserId(user.id);
+    expect(subscription?.tier ?? "free").toBe("free");
   });
 
   it("records the tier that was paid for, not the tier already held", async () => {
     // createOrder used to discard its `tier` argument entirely, so activation
     // read back "free" and a paying customer received nothing.
     const user = await makeUser("upgrader");
-    await repo.subscriptions.createOrder(user.id, "pro", "order_2");
+    await repo.subscriptions.createOrder(user.id, "pro", "order_2", PRO);
 
     const pending = await repo.subscriptions.findByUserId(user.id);
     // Still free — opening checkout must not grant anything...
-    expect(pending?.tier).toBe("free");
+    expect(pending?.tier ?? "free").toBe("free");
 
-    await repo.subscriptions.activateFromPayment(
-      "order_2",
-      "pay_2",
-      new Date(Date.now() + 1000),
-    );
+    await applyVerifiedPayment({
+      orderId: "order_2",
+      paymentId: "pay_upgrade",
+      amountMinor: PRO,
+    });
 
     // ...but the webhook must grant the tier that was actually requested.
     const granted = await repo.subscriptions.findByUserId(user.id);
@@ -96,20 +171,67 @@ describe("payment webhook idempotency", () => {
 
   it("does not downgrade a live subscription when checkout is merely opened", async () => {
     const user = await makeUser("subscriber");
-    await repo.subscriptions.createOrder(user.id, "pro", "order_3");
-    await repo.subscriptions.activateFromPayment(
-      "order_3",
-      "pay_3",
-      new Date(Date.now() + 1000),
-    );
+    await repo.subscriptions.createOrder(user.id, "pro", "order_3", PRO);
+    await applyVerifiedPayment({
+      orderId: "order_3",
+      paymentId: "pay_3",
+      amountMinor: PRO,
+    });
 
     // Opening checkout for a different tier used to flip status to "pending",
     // silently revoking an active subscriber's entitlement mid-period.
-    await repo.subscriptions.createOrder(user.id, "elite", "order_4");
+    await repo.subscriptions.createOrder(user.id, "elite", "order_4", ELITE);
 
     const current = await repo.subscriptions.findByUserId(user.id);
     expect(current?.tier).toBe("pro");
     expect(current?.status).toBe("active");
+  });
+
+  it("can still settle an ABANDONED order after a newer one was opened", async () => {
+    /*
+     * Orders used to be upserted onto the subscription row by userId, so
+     * opening a second checkout overwrote the first order id. A customer who
+     * completed the still-open FIRST payment window was charged for a tier the
+     * database no longer had any record of — the webhook resolved nothing, and
+     * the money was taken with nothing granted.
+     */
+    const user = await makeUser("two-tabs");
+    await repo.subscriptions.createOrder(user.id, "elite", "order_first", ELITE);
+    await repo.subscriptions.createOrder(user.id, "pro", "order_second", PRO);
+
+    const result = await applyVerifiedPayment({
+      orderId: "order_first",
+      paymentId: "pay_first",
+      amountMinor: ELITE,
+    });
+
+    expect(result.applied).toBe(true);
+    const subscription = await repo.subscriptions.findByUserId(user.id);
+    // And they get the tier THAT order was for, not the newer one.
+    expect(subscription?.tier).toBe("elite");
+  });
+
+  it("grants only once when two deliveries settle the same order at once", async () => {
+    const user = await makeUser("concurrent");
+    await repo.subscriptions.createOrder(user.id, "elite", "order_race", ELITE);
+
+    const [a, b] = await Promise.all([
+      applyVerifiedPayment({
+        orderId: "order_race",
+        paymentId: "pay_a",
+        amountMinor: ELITE,
+      }),
+      applyVerifiedPayment({
+        orderId: "order_race",
+        paymentId: "pay_b",
+        amountMinor: ELITE,
+      }),
+    ]);
+
+    // Exactly one wins; the loser reports a decided outcome, not a crash.
+    expect([a.applied, b.applied].filter(Boolean)).toHaveLength(1);
+    const loser = a.applied ? b : a;
+    expect(loser.reason).toBe("order_already_settled");
   });
 });
 
@@ -143,21 +265,21 @@ describe("referral code creation", () => {
     const codeA = (await repo.referrals.getOrCreateCode(a.id)).code;
     const codeB = (await repo.referrals.getOrCreateCode(b.id)).code;
 
-    await expect(repo.referrals.applyCode(codeA, a.id)).rejects.toThrow(
+    await expect(applyReferralCode({ id: a.id } as User, codeA)).rejects.toThrow(
       /own referral code/i,
     );
 
-    await repo.referrals.applyCode(codeA, b.id);
+    await applyReferralCode({ id: b.id } as User, codeA);
     const creditedA = await repo.referrals.stats(a.id);
     expect(creditedA.signupCount).toBe(1);
 
-    await expect(repo.referrals.applyCode(codeA, b.id)).rejects.toThrow(
-      /already been applied/i,
+    await expect(applyReferralCode({ id: b.id } as User, codeA)).rejects.toThrow(
+      /already applied a referral code/i,
     );
 
     // Two throwaway accounts must not be able to mint points off each other.
-    await expect(repo.referrals.applyCode(codeB, a.id)).rejects.toThrow(
-      /reciprocal/i,
+    await expect(applyReferralCode({ id: a.id } as User, codeB)).rejects.toThrow(
+      /you referred this person/i,
     );
   });
 });
@@ -235,7 +357,12 @@ describe("PII boundaries", () => {
     expect(found).not.toHaveProperty("email");
     expect(found).not.toHaveProperty("phone");
     expect(found).not.toHaveProperty("fcmToken");
-    expect(found).not.toHaveProperty("privileges");
+    // `privileges` was never a field on this type, so asserting its absence
+      // proved nothing. Assert the property that actually matters: the public
+      // projection must not carry contact details.
+      expect(found).not.toHaveProperty("email");
+      expect(found).not.toHaveProperty("phone");
+      expect(found).not.toHaveProperty("fcmToken");
   });
 
   it("data export excludes other people's identifying data", async () => {

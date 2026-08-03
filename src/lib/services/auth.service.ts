@@ -69,18 +69,26 @@ export async function createSession(credential: string): Promise<CreatedSession>
  * Deliberately throws when revocation fails rather than reporting success:
  * signing out is what people do when they believe an account is compromised, so
  * a false "signed out" is the worst possible answer.
+ *
+ * Takes a UID, not a cookie value. It used to take the cookie, and the ONLY
+ * caller — the browser — passed null every time, because the cookie is
+ * httpOnly and JavaScript structurally cannot read it. So the function returned
+ * on its first line, forever. The route cleared the browser cookie, which made
+ * sign-out look like it worked, while the session stayed valid at the provider
+ * for its full lifetime. Anyone holding a copy of that cookie kept full access
+ * after the user believed they had signed out.
+ *
+ * The gateway has already verified the session and resolved the uid, so the
+ * caller passes that instead — a value the browser cannot forge or omit.
  */
-export async function destroySession(cookieValue: string | null): Promise<void> {
-  if (!cookieValue) return;
+export async function destroySession(uid: string | null): Promise<void> {
+  // Already signed out: clearing the cookie is the whole job.
+  if (!uid) return;
 
   const provider = authProvider();
 
-  const identity = await provider.verifySession(cookieValue);
-  // Already invalid: nothing to revoke, and clearing the cookie is correct.
-  if (!identity) return;
-
   try {
-    await provider.revokeSessions(identity.uid);
+    await provider.revokeSessions(uid);
   } catch (err) {
     console.error("[auth.service] revocation failed", err);
     throw new GatewayError(
@@ -133,7 +141,10 @@ export async function completeOnboarding(
 
   if (input.referralCode) {
     // Best effort: a bad or already-used code must not block onboarding.
-    await repo.referrals.applyCode(input.referralCode, user.id).catch(() => {});
+    // Goes through the service so the anti-fraud rules apply here too —
+    // signup is exactly where someone would try to farm referrals.
+    const { applyReferralCode } = await import("./referrals.service");
+    await applyReferralCode(user, input.referralCode).catch(() => {});
   }
 
   // Audited here rather than in the gateway: the service is what holds the

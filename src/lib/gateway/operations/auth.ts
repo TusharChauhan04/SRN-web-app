@@ -29,9 +29,18 @@ export const destroySession = defineOperation({
   kind: "mutation",
   access: "public",
   rateTier: "auth",
-  input: z.object({ cookieValue: z.string().nullable() }),
-  handler: async ({ cookieValue }) => {
-    await authService.destroySession(cookieValue);
+  /*
+   * No input. The session identity comes from the verified context, never from
+   * the request body.
+   *
+   * The body used to carry `cookieValue` — a session secret in a POST body,
+   * which is far more likely to reach an access log, an APM trace or a proxy
+   * than an httpOnly cookie, and which anyone could submit for someone else.
+   * `ctx.uid` is resolved by the gateway from the cookie it already verified.
+   */
+  input: z.void(),
+  handler: async (_input, { ctx }) => {
+    await authService.destroySession(ctx.uid);
     return { ok: true as const };
   },
 });

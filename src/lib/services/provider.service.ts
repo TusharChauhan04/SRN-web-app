@@ -254,6 +254,20 @@ export async function confirmUpload(
     throw GatewayError.notFound("Upload not found");
   }
 
+  /*
+   * Confirm only what was really uploaded.
+   *
+   * Nothing else verifies this: `prepare` issues a signed target and `confirm`
+   * marks the row done, so a caller that skipped the PUT entirely still got a
+   * confirmed upload pointing at an object that does not exist. For a KYC
+   * document that means an admin opening an empty file and deciding on it.
+   */
+  if (!(await storageProvider().exists(upload.storageKey))) {
+    throw GatewayError.validation(
+      "That file hasn't finished uploading. Try again.",
+    );
+  }
+
   const url = await storageProvider().getReadUrl(
     upload.storageKey,
     upload.context,

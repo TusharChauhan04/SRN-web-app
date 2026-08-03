@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { RepositoryConflictError } from "../authorize";
 import type {
   BookingRepository,
   CreateBookingInput,
@@ -207,21 +208,48 @@ const QUOTE_INCLUDE = {
   requirement: { select: { id: true, title: true, maxBudget: true } },
 } as const;
 
+/** Prisma's unique-constraint error code, without importing the whole runtime. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: string }).code === "P2002"
+  );
+}
+
 export class PrismaQuoteRepository implements QuoteRepository {
   async create(input: CreateQuoteInput): Promise<Quote> {
-    const row = await prisma.quote.create({
-      data: {
-        requirementId: input.requirementId,
-        senderId: input.senderId,
-        receiverId: input.receiverId,
-        amount: input.amount,
-        durationDays: input.durationDays,
-        message: input.message ?? null,
-        counterOfQuoteId: input.counterOfQuoteId ?? null,
-      },
-      include: QUOTE_INCLUDE,
-    });
-    return toQuote(row);
+    try {
+      const row = await prisma.quote.create({
+        data: {
+          requirementId: input.requirementId,
+          senderId: input.senderId,
+          receiverId: input.receiverId,
+          amount: input.amount,
+          durationDays: input.durationDays,
+          message: input.message ?? null,
+          counterOfQuoteId: input.counterOfQuoteId ?? null,
+        },
+        include: QUOTE_INCLUDE,
+      });
+      return toQuote(row);
+    } catch (err) {
+      /*
+       * One bid per provider per requirement, decided by the database.
+       *
+       * The service checks for an existing bid first, but check-then-insert is
+       * not atomic — a double-clicked submit has both requests read "none" and
+       * both insert. The unique index is what actually prevents it; this turns
+       * that into the same conflict the service's own check produces, so the
+       * loser of the race sees a sentence rather than a 500.
+       */
+      if (isUniqueViolation(err)) {
+        throw new RepositoryConflictError(
+          "You've already bid on this requirement.",
+        );
+      }
+      throw err;
+    }
   }
 
   async findById(id: string): Promise<Quote | null> {
@@ -329,6 +357,64 @@ export class PrismaBookingRepository implements BookingRepository {
       include: BOOKING_INCLUDE,
     });
     return toBooking(row);
+  }
+
+  async createFromAcceptedQuote(input: {
+    quoteId: string;
+    requirementId: string;
+    customerId: string;
+    providerId: string;
+    amount: number;
+  }): Promise<Booking> {
+    return prisma.$transaction(async (tx) => {
+      /*
+       * The conditional claim IS the concurrency gate. Reading the status and
+       * then writing left a window in which two accepts both saw "open".
+       * `updateMany` with the status in the WHERE clause is atomic: exactly one
+       * caller sees count === 1.
+       */
+      const claim = await tx.requirement.updateMany({
+        where: { id: input.requirementId, status: "open" },
+        data: { status: "in_progress" },
+      });
+      if (claim.count === 0) {
+        throw new RepositoryConflictError(
+          "This requirement already has an accepted quote.",
+        );
+      }
+
+      await tx.quote.update({
+        where: { id: input.quoteId },
+        data: { status: "accepted" },
+      });
+
+      // Losing bids close out here, inside the transaction, so their authors
+      // are never left waiting on a booking that half-happened.
+      await tx.quote.updateMany({
+        where: {
+          requirementId: input.requirementId,
+          id: { not: input.quoteId },
+          status: { notIn: ["rejected", "withdrawn"] },
+        },
+        data: { status: "rejected" },
+      });
+
+      // Booking last: if anything above fails there is no orphan row, and
+      // `Booking.quoteId` being unique means an orphan would otherwise make
+      // this quote permanently unacceptable.
+      const row = await tx.booking.create({
+        data: {
+          quoteId: input.quoteId,
+          requirementId: input.requirementId,
+          customerId: input.customerId,
+          providerId: input.providerId,
+          amount: input.amount,
+        },
+        include: BOOKING_INCLUDE,
+      });
+
+      return toBooking(row);
+    });
   }
 
   async findById(id: string): Promise<Booking | null> {

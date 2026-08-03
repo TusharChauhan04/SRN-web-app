@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/client";
 import {
-  SYSTEM_ACTOR,
+  actorUser,
   assertAdmin,
   assertSelfOrAdmin,
   type Actor,
@@ -142,7 +142,7 @@ export class PrismaDisputeRepository implements DisputeRepository {
     status: Extract<DisputeStatus, "resolved" | "rejected">,
   ): Promise<Dispute> {
     assertAdmin(actor, "dispute.resolve");
-    const resolvedById = actor === SYSTEM_ACTOR ? null : actor.id;
+    const resolvedById = actorUser(actor)?.id ?? null;
     const existing = await prisma.dispute.findUnique({
       where: { id },
       select: { bookingId: true, previousBookingStatus: true, status: true },
@@ -215,7 +215,11 @@ export class PrismaVerificationRepository implements VerificationRepository {
     return toVerificationRequest(row);
   }
 
-  async findById(id: string): Promise<VerificationRequest | null> {
+  async findById(
+    id: string,
+    actor: Actor,
+  ): Promise<VerificationRequest | null> {
+    assertAdmin(actor, "verification.findById");
     const row = await prisma.verificationRequest.findUnique({
       where: { id },
       include: VERIFICATION_INCLUDE,
@@ -260,7 +264,7 @@ export class PrismaVerificationRepository implements VerificationRepository {
     note?: string,
   ): Promise<VerificationRequest> {
     assertAdmin(actor, "verification.approve");
-    const reviewedById = actor === SYSTEM_ACTOR ? null : actor.id;
+    const reviewedById = actorUser(actor)?.id ?? null;
     const existing = await prisma.verificationRequest.findUnique({
       where: { id },
       select: { userId: true, status: true },
@@ -299,7 +303,7 @@ export class PrismaVerificationRepository implements VerificationRepository {
     note: string,
   ): Promise<VerificationRequest> {
     assertAdmin(actor, "verification.reject");
-    const reviewedById = actor === SYSTEM_ACTOR ? null : actor.id;
+    const reviewedById = actorUser(actor)?.id ?? null;
     const existing = await prisma.verificationRequest.findUnique({
       where: { id },
       select: { userId: true, status: true },

@@ -13,6 +13,7 @@ import {
   Input,
   Spinner,
   Textarea,
+  safeHref,
 } from "@/components/ui";
 import { ImageUploadField } from "@/components/upload/ImageUploadField";
 import type { PortfolioState } from "./page";
@@ -130,9 +131,9 @@ export function PortfolioManager({
                   </p>
                 ) : null}
 
-                {item.projectUrl ? (
+                {safeHref(item.projectUrl) ? (
                   <a
-                    href={item.projectUrl}
+                    href={safeHref(item.projectUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-2 text-sm text-[var(--primary)] hover:underline"

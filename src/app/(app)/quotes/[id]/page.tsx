@@ -23,13 +23,18 @@ export const metadata = { title: "Quote — SRN" };
 /** Ported from mobile src/screens/shared/QuoteDetailScreen.tsx. */
 export default async function QuoteDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const { id } = await params;
+  const [{ id }, { error: actionError }] = await Promise.all([
+    params,
+    searchParams,
+  ]);
 
   let quote;
   try {
@@ -46,6 +51,14 @@ export default async function QuoteDetailPage({
 
   return (
     <>
+      {actionError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-[var(--destructive)] bg-[var(--destructive)]/10 px-4 py-3 text-sm text-[var(--destructive)]"
+        >
+          {actionError}
+        </p>
+      ) : null}
       <PageHeader
         title={isSender ? "Your quote" : `Quote from ${quote.sender?.name}`}
         description={quote.requirement?.title}

@@ -9,6 +9,23 @@ import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { ROLE_COLORS, ROLE_LABELS, type UserRole } from "@/lib/repositories/types";
 
+/**
+ * Renders a user-supplied link only if its scheme is safe, else `undefined`.
+ *
+ * The gateway refuses anything that is not http(s) on the way IN, but that does
+ * nothing for rows written before that rule existed, or by a seed, an import,
+ * or a future code path that forgets. An `href` is the point where a
+ * `javascript:` URI actually becomes script execution, so the check is repeated
+ * here — at the sink, where it cannot be bypassed by any writer.
+ *
+ * Returning `undefined` makes React drop the attribute entirely: the text stays
+ * visible, the link is inert.
+ */
+export function safeHref(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  return /^https?:\/\//i.test(url.trim()) ? url : undefined;
+}
+
 export function cn(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }

@@ -29,7 +29,7 @@ import type {
   VerificationRequest,
 } from "@/lib/repositories/types";
 import { GatewayError } from "@/lib/gateway/types";
-import { deleteIdentity, revokeUserSessions } from "./auth.service";
+import { revokeUserSessions } from "./auth.service";
 
 // ─────────────────────────── Dashboard ───────────────────────────
 
@@ -207,33 +207,10 @@ export async function eraseUser(
     throw GatewayError.forbidden("Administrators can't be erased here.");
   }
 
-  // Storage keys must be read BEFORE anonymise drops the rows pointing at them,
-  // or the objects are orphaned in the bucket forever.
-  const keys = await repo.users.listStorageKeys(userId, actor);
-  const { storageProvider } = await import(
-    "@/lib/providers/storage/index.server"
-  );
-  await Promise.all(
-    keys.map((key) => storageProvider().delete(key).catch(() => {})),
-  );
-
-  await repo.users.anonymize(userId, actor);
-
-  // The identity provider holds the account independently of our database.
-  await deleteIdentity(userId).catch((err) => {
-    console.error("[admin] identity deletion failed for", userId, err);
-  });
-
-  await repo.audit
-    .record({
-      actorId: actor.id,
-      action: "admin.user.erased",
-      target: userId,
-      metadata: { storageObjectsRemoved: keys.length },
-    })
-    .catch(() => {});
-
-  return { storageObjectsRemoved: keys.length };
+  // One implementation, shared with the GDPR path — the ordering and the
+  // failure handling matter too much to have two copies of.
+  const { performErasureAsAdmin } = await import("./gdpr.service");
+  return performErasureAsAdmin(userId, actor);
 }
 
 // ─────────────────────────── Disputes ───────────────────────────
@@ -315,7 +292,7 @@ export async function getVerificationDocuments(
   actor: User,
   requestId: string,
 ): Promise<{ request: VerificationRequest; documentUrls: string[] }> {
-  const request = await repo.verification.findById(requestId);
+  const request = await repo.verification.findById(requestId, actor);
   if (!request) throw GatewayError.notFound("Verification request not found");
 
   const { storageProvider } = await import(

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { RepositoryConflictError } from "../authorize";
 import type {
   AnalyticsRepository,
   AvailabilityRepository,
@@ -14,6 +15,7 @@ import {
   type PageParams,
   type PortfolioItem,
   type Subscription,
+  type SubscriptionOrder,
   type SubscriptionTier,
   type WorkingHours,
 } from "../types";
@@ -21,6 +23,7 @@ import {
   toBlockedDate,
   toPortfolioItem,
   toSubscription,
+  toSubscriptionOrder,
   toWorkingHours,
 } from "./mappers";
 
@@ -291,39 +294,45 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
     return row ? toSubscription(row) : null;
   }
 
-  async findByPaymentId(paymentId: string): Promise<Subscription | null> {
-    const row = await prisma.subscription.findFirst({
+  async findOrderByPaymentId(
+    paymentId: string,
+  ): Promise<SubscriptionOrder | null> {
+    const row = await prisma.subscriptionOrder.findFirst({
       where: { razorpayPaymentId: paymentId },
     });
-    return row ? toSubscription(row) : null;
+    return row ? toSubscriptionOrder(row) : null;
   }
 
-  async findByOrderId(orderId: string): Promise<Subscription | null> {
-    const row = await prisma.subscription.findFirst({
-      where: { razorpayOrderId: orderId },
+  async findOrderById(orderId: string): Promise<SubscriptionOrder | null> {
+    const row = await prisma.subscriptionOrder.findUnique({
+      where: { id: orderId },
     });
-    return row ? toSubscription(row) : null;
+    return row ? toSubscriptionOrder(row) : null;
   }
 
   async createOrder(
     userId: string,
     tier: SubscriptionTier,
     razorpayOrderId: string,
-  ): Promise<Subscription> {
-    // Record WHICH tier this checkout is for, on `pendingTier`. Two bugs are
-    // being avoided here:
-    //   - the requested tier used to be discarded entirely, so activation
-    //     granted whatever was already there — a user could pay for elite and
-    //     receive nothing;
-    //   - `status` used to be set to "pending", which downgraded a live
-    //     subscriber the moment they opened the upgrade page.
-    // Neither `tier` nor `status` is touched: only the verified webhook grants.
-    const row = await prisma.subscription.upsert({
-      where: { userId },
-      create: { userId, pendingTier: tier, razorpayOrderId },
-      update: { pendingTier: tier, razorpayOrderId },
+    amountMinor: number,
+  ): Promise<SubscriptionOrder> {
+    /*
+     * A ROW PER ORDER, never an upsert on userId.
+     *
+     * The previous version overwrote `razorpayOrderId` on the single
+     * subscription row, so only the most recent checkout could ever be settled.
+     * Someone who opened checkout for elite, went back, opened pro, then
+     * completed the still-open elite payment window was charged and got
+     * nothing: the webhook carried an order id the database no longer knew.
+     *
+     * The tier and the expected amount are frozen here, at creation, so
+     * activation grants what was actually bought — not whatever the price list
+     * says by the time the webhook lands.
+     */
+    const row = await prisma.subscriptionOrder.create({
+      data: { id: razorpayOrderId, userId, tier, amountMinor },
     });
-    return toSubscription(row);
+    return toSubscriptionOrder(row);
   }
 
   async activateFromPayment(
@@ -331,39 +340,59 @@ export class PrismaSubscriptionRepository implements SubscriptionRepository {
     razorpayPaymentId: string,
     periodEnd: Date,
   ): Promise<Subscription> {
-    const existing = await prisma.subscription.findFirst({
-      where: { razorpayOrderId },
-    });
-    if (!existing) {
-      throw new Error(`No subscription found for order ${razorpayOrderId}`);
-    }
+    return prisma.$transaction(async (tx) => {
+      /*
+       * Settling the order is the CONCURRENCY GATE.
+       *
+       * The conditional update is what makes a duplicate webhook safe: only one
+       * caller can move an unsettled order to settled, so only one can go on to
+       * grant the tier. The service checks for a replay first, but that check
+       * is a read — two simultaneous deliveries both pass it. This one cannot
+       * be raced.
+       */
+      const claim = await tx.subscriptionOrder.updateMany({
+        where: { id: razorpayOrderId, razorpayPaymentId: null },
+        data: { razorpayPaymentId, settledAt: new Date() },
+      });
+      if (claim.count === 0) {
+        throw new RepositoryConflictError(
+          `Order ${razorpayOrderId} is unknown or already settled`,
+        );
+      }
 
-    // Grant the tier that was actually paid for. Falling back to the existing
-    // tier only if no pending tier was recorded.
-    const grantedTier = (existing.pendingTier ??
-      existing.tier) as SubscriptionTier;
+      const order = await tx.subscriptionOrder.findUniqueOrThrow({
+        where: { id: razorpayOrderId },
+      });
+      const grantedTier = order.tier as SubscriptionTier;
 
-    // Money path: the subscription row and the user's premium flag must land
-    // together, or a paid user can be left without the entitlement they bought.
-    const [row] = await prisma.$transaction([
-      prisma.subscription.update({
-        where: { id: existing.id },
-        data: {
+      // Money path: the subscription row and the user's premium flag must land
+      // together, or a paid user is left without the entitlement they bought.
+      const row = await tx.subscription.upsert({
+        where: { userId: order.userId },
+        create: {
+          userId: order.userId,
           tier: grantedTier,
-          pendingTier: null,
           status: "active",
+          razorpayOrderId,
+          razorpayPaymentId,
+          currentPeriodEnd: periodEnd,
+        },
+        update: {
+          tier: grantedTier,
+          status: "active",
+          razorpayOrderId,
           razorpayPaymentId,
           currentPeriodEnd: periodEnd,
           cancelAtPeriodEnd: false,
         },
-      }),
-      prisma.user.update({
-        where: { id: existing.userId },
+      });
+      await tx.user.update({
+        where: { id: order.userId },
         data: { isPremium: grantedTier !== "free" },
-      }),
-    ]);
+      });
 
-    return toSubscription(row);
+      return toSubscription(row);
+    });
   }
 
   async cancelAtPeriodEnd(userId: string): Promise<Subscription> {

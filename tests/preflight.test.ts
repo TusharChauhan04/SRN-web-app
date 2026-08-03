@@ -17,6 +17,7 @@ const productionBase = {
   PAYMENT_PROVIDER: "razorpay",
   OTP_PROVIDER: "sms",
   STORAGE_PROVIDER: "firebase",
+  STORAGE_SIGNING_SECRET: "a-real-secret",
   EMAIL_PROVIDER: "smtp",
 } as NodeJS.ProcessEnv;
 
@@ -52,21 +53,39 @@ describe("production configuration", () => {
     ).toContain("STORAGE_PROVIDER");
   });
 
+  it("rejects a MISSPELLED storage provider instead of silently using local disk", () => {
+    // The check used to compare the raw string to "local", so `firebse` passed
+    // preflight while the app ran on local disk and wrote KYC documents to it.
+    expect(
+      fatalSettings({ ...productionBase, STORAGE_PROVIDER: "firebse" }),
+    ).toContain("STORAGE_PROVIDER");
+    expect(
+      fatalSettings({ ...productionBase, STORAGE_PROVIDER: "s3" }),
+    ).toContain("STORAGE_PROVIDER");
+  });
+
+  it("rejects a missing storage signing secret", () => {
+    // Unset, every instance signs with its own random key: signed KYC links
+    // minted by one instance are rejected by the next.
+    const env = { ...productionBase };
+    delete env.STORAGE_SIGNING_SECRET;
+    expect(fatalSettings(env)).toContain("STORAGE_SIGNING_SECRET");
+  });
+
   it("rejects a missing app URL, which disables the cross-origin check", () => {
     const env = { ...productionBase };
     delete env.NEXT_PUBLIC_APP_URL;
     expect(fatalSettings(env)).toContain("NEXT_PUBLIC_APP_URL");
   });
 
-  it("treats a missing email provider as a warning, not fatal", () => {
-    // Nobody loses data; a toggle just does not deliver. Worth saying, not
-    // worth blocking a deploy over.
-    const problems = checkConfiguration({
-      ...productionBase,
-      EMAIL_PROVIDER: "console",
-    });
-    expect(problems.map((p) => p.setting)).toContain("EMAIL_PROVIDER");
-    expect(fatalProblems(problems)).toEqual([]);
+  it("rejects the console email provider in production", () => {
+    // Was a warning on the grounds that nobody loses data. That was wrong on
+    // both counts: notification bodies carry personal data into the server log,
+    // and the provider now refuses to construct in production — so shipping it
+    // is a crash on the first notification, not a degraded feature.
+    expect(
+      fatalSettings({ ...productionBase, EMAIL_PROVIDER: "console" }),
+    ).toContain("EMAIL_PROVIDER");
   });
 });
 

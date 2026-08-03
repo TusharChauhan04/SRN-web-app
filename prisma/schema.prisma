@@ -32,7 +32,13 @@ model User {
   role  String // business | customer | digital | local | admin
 
   // Shared optional profile
-  phone         String?
+  /// Unique across accounts. Phone verification is an identity signal used for
+  /// trust badges and account recovery; without this constraint the same number
+  /// could verify any number of accounts, which makes the badge meaningless and
+  /// gives a suspended user a route back in. NULL is exempt (many rows may have
+  /// no phone), which is what a nullable unique index does in both SQLite and
+  /// Postgres.
+  phone         String? @unique
   bio           String?
   location      String?
   avatarUrl     String?
@@ -98,6 +104,11 @@ model User {
   auditEvents          AuditEvent[]
   notificationPrefs    NotificationPref?
   phoneVerification    PhoneVerification?
+  subscriptionOrders   SubscriptionOrder[]
+
+  /// countCreatedSince and the admin growth series filter on createdAt;
+  /// without this both are full table scans of the largest table.
+  @@index([createdAt])
 }
 
 // ─────────────────────────── Marketplace core ───────────────────────────
@@ -124,6 +135,10 @@ model Requirement {
   @@index([creatorId])
   @@index([status])
   @@index([category])
+  /// The open-requirements feed: filter by status, newest first, take 50.
+  @@index([status, createdAt])
+  /// Admin growth series buckets by creation date.
+  @@index([createdAt])
 }
 
 model Quote {
@@ -147,10 +162,16 @@ model Quote {
   receiver    User        @relation("QuoteReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
   booking     Booking?
 
-  @@index([requirementId])
+  /// One live bid per provider per requirement, enforced by the DATABASE.
+  /// The service checks for an existing quote first, but a check-then-insert is
+  /// not atomic: two concurrent submissions both read "none" and both insert.
+  @@unique([requirementId, senderId])
   @@index([senderId])
   @@index([receiverId])
   @@index([status])
+  /// Both quote lists filter by one participant and sort by date.
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
 }
 
 model Booking {
@@ -178,11 +199,15 @@ model Booking {
   @@index([customerId])
   @@index([providerId])
   @@index([status])
+  /// Both booking lists filter by one party and sort by date.
+  @@index([customerId, createdAt])
+  @@index([providerId, createdAt])
+  @@index([createdAt])
 }
 
 model Review {
-  id        String @id @default(cuid())
-  bookingId String @unique
+  id        String  @id @default(cuid())
+  bookingId String  @unique
   authorId  String
   subjectId String
   rating    Int
@@ -198,18 +223,22 @@ model Review {
   subject User    @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
 
   @@index([subjectId])
+  /// listForAuthor / GDPR export filter on authorId.
+  @@index([authorId])
+  /// The admin fraud view ORs isFlagged with rating and sorts by date.
+  @@index([isFlagged, createdAt])
 }
 
 // ─────────────────────────── Messaging ───────────────────────────
 
 model Conversation {
-  id            String    @id @default(cuid())
+  id              String   @id @default(cuid())
   /// Comma-joined participant uids, sorted — the lookup key for 1:1 threads.
   /// Unique: without it, two simultaneous messages in opposite directions
   /// create duplicate threads that can never be merged. Also gives the lookup
   /// an index instead of a leading-wildcard table scan.
-  participantIds String    @unique
-  lastMessageAt DateTime  @default(now())
+  participantIds  String   @unique
+  lastMessageAt   DateTime @default(now())
   lastMessageText String?
 
   createdAt DateTime @default(now())
@@ -240,23 +269,29 @@ model Message {
   sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
+  /// countUnread filters (receiverId, read, isDeleted) and runs on every
+  /// dashboard render for both roles. Without this it is a full table scan.
+  /// Prisma does not create indexes for relation scalars on SQLite/Postgres.
+  @@index([receiverId, read, isDeleted])
+  /// GDPR export and anonymize both filter on senderId.
+  @@index([senderId])
   @@index([isFlagged])
 }
 
 // ─────────────────────────── Trust & safety ───────────────────────────
 
 model Dispute {
-  id        String  @id @default(cuid())
-  bookingId String
-  raisedById String
-  reason    String
-  details   String
+  id           String    @id @default(cuid())
+  bookingId    String
+  raisedById   String
+  reason       String
+  details      String
   /// Comma-joined upload URLs.
   evidenceUrls String?
-  status    String  @default("open") // open | under_review | resolved | rejected
-  resolution String?
+  status       String    @default("open") // open | under_review | resolved | rejected
+  resolution   String?
   resolvedById String?
-  resolvedAt DateTime?
+  resolvedAt   DateTime?
 
   /// The booking's status before the dispute moved it to "disputed".
   /// Without this, closing a dispute cannot restore the booking correctly —
@@ -274,15 +309,15 @@ model Dispute {
 }
 
 model VerificationRequest {
-  id       String  @id @default(cuid())
-  userId   String
-  docType  String // aadhaar | pan | gst | license | other
+  id           String    @id @default(cuid())
+  userId       String
+  docType      String // aadhaar | pan | gst | license | other
   /// Comma-joined upload URLs of the submitted documents.
-  docUrls  String
-  status   String  @default("pending") // pending | approved | rejected
-  reviewNote String?
+  docUrls      String
+  status       String    @default("pending") // pending | approved | rejected
+  reviewNote   String?
   reviewedById String?
-  reviewedAt DateTime?
+  reviewedAt   DateTime?
 
   createdAt DateTime @default(now())
 
@@ -293,15 +328,15 @@ model VerificationRequest {
 }
 
 model Report {
-  id           String  @id @default(cuid())
-  reporterId   String
-  reportedId   String
-  targetType   String // user | message | requirement | review
-  targetId     String?
-  reason       String
-  details      String?
-  status       String  @default("open") // open | resolved | dismissed
-  resolvedAt   DateTime?
+  id         String    @id @default(cuid())
+  reporterId String
+  reportedId String
+  targetType String // user | message | requirement | review
+  targetId   String?
+  reason     String
+  details    String?
+  status     String    @default("open") // open | resolved | dismissed
+  resolvedAt DateTime?
 
   createdAt DateTime @default(now())
 
@@ -366,6 +401,37 @@ model BlockedDate {
   @@unique([userId, date])
 }
 
+/// An outstanding checkout, one row per order.
+///
+/// Orders used to live on Subscription itself, upserted by userId — so opening
+/// a second checkout OVERWROTE the first order id. If the customer then
+/// completed the still-open first payment window, the webhook arrived with an
+/// order nothing recognised, and the money was taken with no plan granted.
+/// Giving orders their own rows means any outstanding one can still be settled.
+model SubscriptionOrder {
+  /// The provider's order id. Natural primary key: it is what the webhook
+  /// carries, and it is unique at the provider.
+  id                String    @id
+  userId            String
+  /// The tier this order was opened for. The webhook grants THIS, never a value
+  /// supplied by the caller.
+  tier              String
+  /// Expected amount in the smallest currency unit, recorded when the order was
+  /// created so payment can be checked against the price at that moment rather
+  /// than today's price list.
+  amountMinor       Int
+  /// Set once a payment settles this order. Its presence is the replay guard.
+  razorpayPaymentId String?
+  settledAt         DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([razorpayPaymentId])
+}
+
 model Subscription {
   id     String @id @default(cuid())
   userId String @unique
@@ -373,17 +439,12 @@ model Subscription {
   tier   String @default("free") // free | pro | elite
   status String @default("active") // active | cancelled | past_due
 
-  /// The tier a pending checkout is for. Kept separate from `tier` so opening
-  /// or abandoning a checkout can never downgrade a live subscription, and so
-  /// activation knows what was actually paid for.
-  pendingTier String?
-
   razorpayOrderId        String?
   razorpayPaymentId      String?
   razorpaySubscriptionId String?
 
-  currentPeriodEnd   DateTime?
-  cancelAtPeriodEnd  Boolean   @default(false)
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean   @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -411,23 +472,23 @@ model Notification {
 }
 
 model NotificationPref {
-  userId String  @id
-  push   Boolean @default(true)
-  email  Boolean @default(true)
-  quotes Boolean @default(true)
-  bookings Boolean @default(true)
-  messages Boolean @default(true)
+  userId    String  @id
+  push      Boolean @default(true)
+  email     Boolean @default(true)
+  quotes    Boolean @default(true)
+  bookings  Boolean @default(true)
+  messages  Boolean @default(true)
   marketing Boolean @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Referral {
-  userId       String @id
-  code         String @unique
+  userId       String  @id
+  code         String  @unique
   referredById String?
-  signupCount  Int    @default(0)
-  rewardPoints Int    @default(0)
+  signupCount  Int     @default(0)
+  rewardPoints Int     @default(0)
 
   createdAt DateTime @default(now())
 
@@ -456,16 +517,16 @@ model Presence {
 // ─────────────────────────── Platform ───────────────────────────
 
 model Upload {
-  id          String  @id @default(cuid())
-  userId      String
-  fileName    String
-  mimeType    String
-  sizeBytes   Int
-  context     String // avatar | portfolio | document | evidence
-  entityId    String?
-  storageKey  String
-  publicUrl   String?
-  confirmed   Boolean @default(false)
+  id         String  @id @default(cuid())
+  userId     String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  context    String // avatar | portfolio | document | evidence
+  entityId   String?
+  storageKey String
+  publicUrl  String?
+  confirmed  Boolean @default(false)
 
   createdAt DateTime @default(now())
 

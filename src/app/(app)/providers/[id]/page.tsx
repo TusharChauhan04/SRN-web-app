@@ -13,6 +13,7 @@ import {
   Stat,
   formatCurrency,
   formatDate,
+  safeHref,
 } from "@/components/ui";
 
 export const metadata = { title: "Provider — SRN" };
@@ -122,9 +123,9 @@ export default async function ProviderProfilePage({
                         {item.description}
                       </p>
                     ) : null}
-                    {item.projectUrl ? (
+                    {safeHref(item.projectUrl) ? (
                       <a
-                        href={item.projectUrl}
+                        href={safeHref(item.projectUrl)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2 inline-block text-sm text-[var(--primary)] hover:underline"

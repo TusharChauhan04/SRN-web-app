@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db/client";
-import { assertAdmin, type Actor } from "../authorize";
+import {
+  RepositoryConflictError,
+  assertAdmin,
+  type Actor,
+} from "../authorize";
 import type {
   AuditRepository,
   PhoneChallenge,
@@ -103,12 +107,29 @@ export class PrismaNotificationRepository implements NotificationRepository {
   }
 
   async getPrefs(userId: string): Promise<NotificationPrefs> {
-    const row = await prisma.notificationPref.upsert({
-      where: { userId },
-      create: { userId },
-      update: {},
-    });
-    return toNotificationPrefs(row);
+    /*
+     * A READ. It used to be an upsert, which wrote a row on every call — and
+     * `notify()` calls this for every notification, so a read path was issuing
+     * a write transaction per delivered message. On SQLite, where there is one
+     * writer at a time, that put chat traffic behind the write lock.
+     *
+     * Falling back to the defaults in code means no row has to exist. `setPrefs`
+     * still upserts, so the row is created the first time someone changes
+     * anything — which is the only time it carries information.
+     */
+    const row = await prisma.notificationPref.findUnique({ where: { userId } });
+    if (row) return toNotificationPrefs(row);
+
+    // Must match the @default values in schema.prisma.
+    return {
+      userId,
+      push: true,
+      email: true,
+      quotes: true,
+      bookings: true,
+      messages: true,
+      marketing: false,
+    };
   }
 
   async setPrefs(
@@ -175,23 +196,17 @@ export class PrismaReferralRepository implements ReferralRepository {
     return row ? toReferral(row) : null;
   }
 
-  async applyCode(code: string, newUserId: string): Promise<Referral> {
-    const owner = await prisma.referral.findUnique({
-      where: { code: code.toUpperCase() },
-    });
-    if (!owner) throw new Error("Invalid referral code");
-    if (owner.userId === newUserId) {
-      throw new Error("Cannot apply your own referral code");
-    }
-
-    // Reciprocal farming guard: two throwaway accounts applying each other's
-    // codes used to mint points with no third party involved.
-    if (owner.referredById === newUserId) {
-      throw new Error("Reciprocal referrals are not allowed");
-    }
-
+  /**
+   * The atomic half of applying a referral. The RULES are in
+   * referrals.service.ts — see the interface docstring for why.
+   */
+  async claimReferral(input: {
+    newUserId: string;
+    ownerUserId: string;
+    rewardPoints: number;
+  }): Promise<Referral> {
     // Ensure the new user has a referral row before the transaction claims it.
-    await this.getOrCreateCode(newUserId);
+    await this.getOrCreateCode(input.newUserId);
 
     // Interactive transaction: the read of `referredById` and the write that
     // sets it must not be separated, or two concurrent submissions both see
@@ -199,18 +214,20 @@ export class PrismaReferralRepository implements ReferralRepository {
     return prisma.$transaction(async (tx) => {
       const claim = await tx.referral.updateMany({
         // Conditional update IS the check — only succeeds while still unset.
-        where: { userId: newUserId, referredById: null },
-        data: { referredById: owner.userId },
+        where: { userId: input.newUserId, referredById: null },
+        data: { referredById: input.ownerUserId },
       });
       if (claim.count === 0) {
-        throw new Error("A referral code has already been applied");
+        throw new RepositoryConflictError(
+          "A referral code has already been applied",
+        );
       }
 
       const updatedOwner = await tx.referral.update({
-        where: { userId: owner.userId },
+        where: { userId: input.ownerUserId },
         data: {
           signupCount: { increment: 1 },
-          rewardPoints: { increment: 100 },
+          rewardPoints: { increment: input.rewardPoints },
         },
       });
 

@@ -25,14 +25,41 @@ import type { NotificationPrefs } from "@/lib/repositories/types";
  * events (verification, subscription, disputes) that a user should not be able
  * to silence, because missing them has consequences.
  */
+/**
+ * Which preference toggle silences which notification.
+ *
+ * This map must cover every type that is NOT in `ALWAYS_ON` below. A type
+ * missing from both was silently unsilenceable: `review_received` ignored the
+ * user's settings entirely, while `booking_confirmed` sat here as a dead entry
+ * for an event nothing emits. Both are the same drift, in opposite directions.
+ *
+ * There is no separate "reviews" toggle — mobile's preference screen offers
+ * quotes / bookings / messages / marketing — so a review, which only ever
+ * arises from a completed booking, is governed by `bookings`.
+ */
 const PREF_BY_TYPE: Record<string, keyof Omit<NotificationPrefs, "userId">> = {
   quote_received: "quotes",
   quote_shortlisted: "quotes",
   quote_accepted: "quotes",
   booking_completed: "bookings",
-  booking_confirmed: "bookings",
+  review_received: "bookings",
   message: "messages",
 };
+
+/**
+ * Types that deliberately ignore preferences.
+ *
+ * Account-level events: money, identity, and moderation. Someone who has turned
+ * off "quotes" has not asked to stop hearing that their KYC was rejected or
+ * that a dispute was opened against them.
+ */
+const ALWAYS_ON = new Set([
+  "dispute_opened",
+  "dispute_resolved",
+  "verification_approved",
+  "verification_rejected",
+  "subscription_active",
+]);
 
 export interface NotifyInput {
   userId: string;
@@ -47,7 +74,14 @@ export async function notify(input: NotifyInput): Promise<void> {
     const prefs = await repo.notifications.getPrefs(input.userId);
 
     const governing = PREF_BY_TYPE[input.type];
-    // An account-level event has no governing preference and always goes out.
+    if (!governing && !ALWAYS_ON.has(input.type)) {
+      // Neither silenceable nor deliberately unconditional — a new type was
+      // added without deciding. Loud in dev, still delivered in production.
+      console.warn(
+        `[notify] "${input.type}" is in neither PREF_BY_TYPE nor ALWAYS_ON; ` +
+          "it will ignore the user's preferences. Add it to one of them.",
+      );
+    }
     const wantsInApp = governing ? prefs[governing] : true;
     if (!wantsInApp) return;
 

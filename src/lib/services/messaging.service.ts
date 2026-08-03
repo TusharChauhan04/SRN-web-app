@@ -91,7 +91,25 @@ export async function sendMessage(
   }
 
   if (input.conversationId) {
-    await assertParticipant(actor, input.conversationId);
+    const conversation = await assertParticipant(actor, input.conversationId);
+
+    /*
+     * The recipient must be a participant of THIS thread.
+     *
+     * Checking "sender is a participant" and "sender hasn't been blocked by
+     * recipientId" separately left a gap, because nothing tied the two
+     * arguments together. After B blocks A, A still has the A↔B thread id — so
+     * A could send with `conversationId` = the A↔B thread and `recipientId` =
+     * some third party who hasn't blocked them. The block check passed (wrong
+     * pair), the participant check passed (A is in that thread), and the
+     * message landed in B's conversation with the preview on B's list. The
+     * block was bypassed.
+     */
+    if (!conversation.participantIds.includes(input.recipientId)) {
+      throw GatewayError.validation(
+        "That recipient isn't part of this conversation.",
+      );
+    }
   }
 
   const { message } = await repo.messages.send({
@@ -130,8 +148,9 @@ export async function deleteMessage(
 ): Promise<void> {
   await assertParticipant(actor, conversationId);
 
-  const page = await repo.messages.listMessages(conversationId, { limit: 100 });
-  const message = page.items.find((m) => m.id === messageId);
+  // By id, not by scanning a page: the page is bounded, so scanning it made
+  // messages beyond the limit undeletable.
+  const message = await repo.messages.findMessageById(conversationId, messageId);
   if (!message) throw GatewayError.notFound("Message not found");
   if (message.senderId !== actor.id) {
     throw GatewayError.forbidden("You can only delete your own messages.");

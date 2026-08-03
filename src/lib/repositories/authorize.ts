@@ -21,6 +21,19 @@ import type { User } from "./types";
  * `requireUser` / `requireRole` — this does not replace them.
  */
 
+/**
+ * A write lost a race for something only one caller may have.
+ *
+ * Distinct from a validation error: the request was valid when it was made and
+ * someone else got there first.
+ */
+export class RepositoryConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepositoryConflictError";
+  }
+}
+
 export class RepositoryForbiddenError extends Error {
   constructor(message: string) {
     super(message);
@@ -36,15 +49,40 @@ export class RepositoryForbiddenError extends Error {
  * type and impossible to produce by accident from a request.
  */
 export const SYSTEM_ACTOR = Symbol("system-actor");
-export type Actor = User | typeof SYSTEM_ACTOR;
+
+/**
+ * Nobody is signed in.
+ *
+ * This exists because the gateway used to substitute `SYSTEM_ACTOR` whenever
+ * `ctx.user` was null — which is precisely the unauthenticated case. "No
+ * identity" was being promoted to "full system privileges" on exactly the
+ * requests where a forgotten policy is most dangerous. Every guard below
+ * refuses it, so a `public` operation that reaches a privileged repository
+ * method fails instead of succeeding.
+ */
+export const ANONYMOUS_ACTOR = Symbol("anonymous-actor");
+
+export type Actor = User | typeof SYSTEM_ACTOR | typeof ANONYMOUS_ACTOR;
+
+/** Narrows an actor to a real person, or null for the two symbols. */
+export function actorUser(actor: Actor): User | null {
+  return actor === SYSTEM_ACTOR || actor === ANONYMOUS_ACTOR ? null : actor;
+}
 
 function describe(actor: Actor): string {
-  return actor === SYSTEM_ACTOR ? "system" : `${actor.id} (${actor.role})`;
+  if (actor === SYSTEM_ACTOR) return "system";
+  if (actor === ANONYMOUS_ACTOR) return "an unauthenticated caller";
+  return `${actor.id} (${actor.role})`;
 }
 
 /** Throws unless the actor is an admin, or the system. */
 export function assertAdmin(actor: Actor, operation: string): void {
   if (actor === SYSTEM_ACTOR) return;
+  if (actor === ANONYMOUS_ACTOR) {
+    throw new RepositoryForbiddenError(
+      `${operation} requires an admin; actor is ${describe(actor)}`,
+    );
+  }
   if (actor.role !== "admin") {
     throw new RepositoryForbiddenError(
       `${operation} requires an admin; actor is ${describe(actor)}`,
@@ -64,6 +102,11 @@ export function assertSelfOrAdmin(
   operation: string,
 ): void {
   if (actor === SYSTEM_ACTOR) return;
+  if (actor === ANONYMOUS_ACTOR) {
+    throw new RepositoryForbiddenError(
+      `${operation} on ${subjectId} requires that user or an admin; actor is ${describe(actor)}`,
+    );
+  }
   if (actor.role === "admin") return;
   if (actor.id !== subjectId) {
     throw new RepositoryForbiddenError(

@@ -16,7 +16,7 @@ import type { TypeOf, ZodType } from "zod";
 import { repo } from "@/lib/repositories";
 import {
   RepositoryForbiddenError,
-  SYSTEM_ACTOR,
+  ANONYMOUS_ACTOR,
   type Actor,
 } from "@/lib/repositories/authorize";
 import type { User } from "@/lib/repositories/types";
@@ -203,7 +203,15 @@ export async function invoke<TInput, TOutput>(
   const hc: HandlerContext = {
     ctx,
     user: ctx.user as User,
-    actor: (ctx.user ?? SYSTEM_ACTOR) as Actor,
+    /*
+     * No user means ANONYMOUS, never SYSTEM.
+     *
+     * This was `ctx.user ?? SYSTEM_ACTOR`, which handed full system privileges
+     * to every unauthenticated caller — the `public` and `onboarding`
+     * operations. SYSTEM_ACTOR is for callers with no human behind them (the
+     * seed, the payment webhook), and those construct it explicitly.
+     */
+    actor: ctx.user ?? ANONYMOUS_ACTOR,
   };
 
   let output: TOutput;

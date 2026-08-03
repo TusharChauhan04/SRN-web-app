@@ -348,6 +348,27 @@ export interface BlockedDate {
   reason?: string | null;
 }
 
+/**
+ * An outstanding checkout.
+ *
+ * Separate from `Subscription` because a user may have several open at once —
+ * they opened a checkout, went back, and opened another. Any of them can still
+ * be paid, so any of them must still be settleable.
+ */
+export interface SubscriptionOrder {
+  /** The payment provider's order id. */
+  id: string;
+  userId: string;
+  /** The tier this order was opened for. The webhook grants THIS. */
+  tier: SubscriptionTier;
+  /** Expected amount in the smallest currency unit, fixed at creation time. */
+  amountMinor: number;
+  /** Set once settled. Its presence is what makes a replay detectable. */
+  razorpayPaymentId?: string | null;
+  settledAt?: Date | null;
+  createdAt: Date;
+}
+
 export interface Subscription {
   id: string;
   userId: string;

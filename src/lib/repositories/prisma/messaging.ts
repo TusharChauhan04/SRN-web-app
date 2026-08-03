@@ -164,14 +164,34 @@ export class PrismaMessageRepository implements MessageRepository {
     const [rows, total] = await Promise.all([
       prisma.message.findMany({
         where,
-        orderBy: { createdAt: "asc" },
+        // Newest first at the database so `take` keeps the RECENT messages.
+        // Ordering ascending here would take the OLDEST `limit` and a busy
+        // conversation would freeze at that page forever.
+        orderBy: { createdAt: "desc" },
         take: limit,
         skip: offset,
       }),
       prisma.message.count({ where }),
     ]);
 
-    return { items: rows.map(toMessage), total, limit, offset };
+    // Reversed back to oldest-first, which is how a thread reads.
+    return {
+      items: rows.reverse().map(toMessage),
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  async findMessageById(
+    conversationId: string,
+    messageId: string,
+  ): Promise<Message | null> {
+    const row = await prisma.message.findFirst({
+      // Scoped by conversation so an id from another thread cannot be reached.
+      where: { id: messageId, conversationId, isDeleted: false },
+    });
+    return row ? toMessage(row) : null;
   }
 
   async markConversationRead(

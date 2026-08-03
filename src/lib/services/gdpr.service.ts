@@ -123,32 +123,81 @@ export async function cancelDeletion(actor: User): Promise<User> {
  * automatic erasure after the grace period needs a scheduler this app does not
  * have. Recorded in WEB_MIGRATION_PLAN.md.
  */
-export async function performErasure(
+/**
+ * The erasure sequence itself, shared by the admin path and the GDPR path.
+ *
+ * Order is load-bearing and the failure handling is the point:
+ *
+ *  1. read the storage keys, because `anonymize` deletes the rows holding them
+ *  2. delete the objects, and STOP if any of them fail
+ *  3. only then anonymise, which is the irreversible step
+ *
+ * Step 2 used to be `.catch(() => {})`. A failed delete was silent, erasure
+ * reported success, and then step 3 destroyed the only record of which objects
+ * still existed — leaving KYC identity documents in the bucket with nothing
+ * left to point at them, and no way to retry. Throwing keeps the keys intact so
+ * the operation can simply be run again once the cause is fixed.
+ */
+async function eraseUserData(
   userId: string,
   actor: User,
+  auditAction: string,
 ): Promise<{ storageObjectsRemoved: number }> {
   const keys = await repo.users.listStorageKeys(userId, actor);
 
   const { storageProvider } = await import(
     "@/lib/providers/storage/index.server"
   );
-  await Promise.all(
-    keys.map((key) => storageProvider().delete(key).catch(() => {})),
+  const results = await Promise.allSettled(
+    keys.map((key) => storageProvider().delete(key)),
   );
 
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    console.error(
+      `[erasure] ${failed.length}/${keys.length} objects could not be deleted ` +
+        `for ${userId}; database left intact so this can be retried`,
+      failed.map((f) => (f as PromiseRejectedResult).reason),
+    );
+    throw new GatewayError(
+      "provider_error",
+      `Couldn't delete ${failed.length} stored file(s). Nothing has been ` +
+        `erased — try again once storage is reachable.`,
+    );
+  }
+
   await repo.users.anonymize(userId, actor);
+
+  // The identity provider holds the account independently of our database.
+  // Logged rather than thrown: the personal data is already gone at this point,
+  // and failing here would leave the caller unable to retry a completed erasure.
   await deleteIdentity(userId).catch((err) => {
-    console.error("[gdpr] identity deletion failed for", userId, err);
+    console.error("[erasure] identity deletion failed for", userId, err);
   });
 
   await repo.audit
     .record({
       actorId: actor.id,
-      action: "gdpr.erased",
+      action: auditAction,
       target: userId,
       metadata: { storageObjectsRemoved: keys.length },
     })
     .catch(() => {});
 
   return { storageObjectsRemoved: keys.length };
+}
+
+export async function performErasure(
+  userId: string,
+  actor: User,
+): Promise<{ storageObjectsRemoved: number }> {
+  return eraseUserData(userId, actor, "gdpr.erased");
+}
+
+/** The same sequence, for the admin-initiated path. */
+export async function performErasureAsAdmin(
+  userId: string,
+  actor: User,
+): Promise<{ storageObjectsRemoved: number }> {
+  return eraseUserData(userId, actor, "admin.user.erased");
 }

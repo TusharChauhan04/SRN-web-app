@@ -11,8 +11,7 @@ import { z } from "zod";
 import { defineOperation } from "../core";
 import * as verification from "@/lib/services/verification.service";
 import * as gdpr from "@/lib/services/gdpr.service";
-import { repo } from "@/lib/repositories";
-import { GatewayError } from "../types";
+import * as referrals from "@/lib/services/referrals.service";
 
 // ─────────────────────────── Phone ───────────────────────────
 
@@ -107,16 +106,10 @@ export const applyReferral = defineOperation({
   access: "authenticated",
   input: z.object({ code: z.string().trim().min(4).max(20) }),
   handler: async ({ code }, { user }) => {
-    try {
-      await repo.referrals.applyCode(code, user.id);
-      return { ok: true as const };
-    } catch (err) {
-      // The repository throws plain Errors for the business rules here
-      // (self-referral, reciprocal, already applied, unknown code). Surface the
-      // message rather than a generic 500, since each is user-actionable.
-      throw GatewayError.conflict(
-        err instanceof Error ? err.message : "That code couldn't be applied.",
-      );
-    }
+    // The rules (unknown code, self-referral, reciprocal farming, already
+    // applied) live in the service and raise typed GatewayErrors, so there is
+    // nothing to translate here.
+    await referrals.applyReferralCode(user, code);
+    return { ok: true as const };
   },
 });

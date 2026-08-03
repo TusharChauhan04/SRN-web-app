@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { externalUrl } from "../schemas";
 import { defineOperation } from "../core";
 import * as account from "@/lib/services/account.service";
 import * as messaging from "@/lib/services/messaging.service";
@@ -27,7 +28,7 @@ export const updateProfile = defineOperation({
     isAvailable: z.boolean().optional(),
     companyName: z.string().trim().max(120).optional(),
     industry: z.string().trim().max(120).optional(),
-    portfolioLinks: z.array(z.string().url().max(500)).max(10).optional(),
+    portfolioLinks: z.array(externalUrl).max(10).optional(),
   }),
   // No id: this only ever updates the caller's own profile.
   handler: (input, { user }) => account.updateMyProfile(user, input),

@@ -36,6 +36,7 @@ import type {
   RequirementStatus,
   Review,
   Subscription,
+  SubscriptionOrder,
   SubscriptionTier,
   Upload,
   UploadContext,
@@ -235,6 +236,26 @@ export interface ListBookingsFilter extends PageParams {
 
 export interface BookingRepository {
   create(input: CreateBookingInput): Promise<Booking>;
+  /**
+   * Turns an accepted quote into a booking, atomically.
+   *
+   * All four writes — claim the requirement, accept the quote, create the
+   * booking, reject the losing bids — happen in one transaction, and the
+   * requirement claim is a CONDITIONAL update that doubles as the concurrency
+   * gate. Without it, accepting two different bids on the same requirement in
+   * the same instant produced two bookings and two committed providers; and a
+   * failure between the writes left an orphan booking that made the quote
+   * permanently unacceptable, because `Booking.quoteId` is unique.
+   *
+   * Throws `RepositoryConflictError` when the requirement is already claimed.
+   */
+  createFromAcceptedQuote(input: {
+    quoteId: string;
+    requirementId: string;
+    customerId: string;
+    providerId: string;
+    amount: number;
+  }): Promise<Booking>;
   findById(id: string): Promise<Booking | null>;
   list(filter?: ListBookingsFilter): Promise<Page<Booking>>;
   updateStatus(id: string, status: BookingStatus): Promise<Booking>;
@@ -302,10 +323,23 @@ export interface MessageRepository {
     userIdA: string,
     userIdB: string,
   ): Promise<Conversation | null>;
+  /**
+   * The MOST RECENT `limit` messages, returned oldest-first for rendering.
+   *
+   * Newest-first at the database and reversed here, deliberately: taking the
+   * oldest N meant a conversation past the limit never showed a new message
+   * again, and the 5s poll would overwrite an optimistically-sent message with
+   * the stale page — the sender watched their own message disappear.
+   */
   listMessages(
     conversationId: string,
     params?: PageParams,
   ): Promise<Page<Message>>;
+  /** Single message by id. Used by delete, which must not scan a page. */
+  findMessageById(
+    conversationId: string,
+    messageId: string,
+  ): Promise<Message | null>;
   markConversationRead(conversationId: string, readerId: string): Promise<void>;
   deleteMessage(conversationId: string, messageId: string): Promise<void>;
 
@@ -357,7 +391,13 @@ export interface CreateVerificationInput {
 
 export interface VerificationRepository {
   create(input: CreateVerificationInput): Promise<VerificationRequest>;
-  findById(id: string): Promise<VerificationRequest | null>;
+  /**
+   * Takes an `actor` because this is the call that resolves the STORAGE KEYS
+   * for someone's identity documents. Every other privileged method on this
+   * repository asserts one; this one is how those documents are reached, so it
+   * gets the same second line of defence as approve/reject.
+   */
+  findById(id: string, actor: Actor): Promise<VerificationRequest | null>;
   findLatestForUser(userId: string): Promise<VerificationRequest | null>;
   listQueue(
     filter?: PageParams & { status?: VerificationStatus },
@@ -423,22 +463,28 @@ export interface SubscriptionRepository {
    * explicitly may deliver the same event more than once. Without this, a
    * retry re-grants the tier and extends the period again.
    */
-  findByPaymentId(paymentId: string): Promise<Subscription | null>;
+  findOrderByPaymentId(paymentId: string): Promise<SubscriptionOrder | null>;
   /**
    * Order-level replay guard.
    *
-   * Distinct from `findByPaymentId`: a provider retry reuses the payment id,
-   * but a duplicate or resubmitted webhook can carry a NEW payment id for an
-   * order that was already settled. Guarding only on payment id lets the same
-   * order be granted twice.
+   * Distinct from `findOrderByPaymentId`: a provider retry reuses the payment
+   * id, but a duplicate or resubmitted webhook can carry a NEW payment id for
+   * an order that was already settled. Guarding only on payment id lets the
+   * same order be granted twice.
    */
-  findByOrderId(orderId: string): Promise<Subscription | null>;
-  /** Records the pending Razorpay order before checkout opens. */
+  findOrderById(orderId: string): Promise<SubscriptionOrder | null>;
+  /**
+   * Records a pending order before checkout opens.
+   *
+   * `amountMinor` is stored so the webhook can check what was paid against the
+   * price at the moment the order was created, rather than today's price list.
+   */
   createOrder(
     userId: string,
     tier: SubscriptionTier,
     razorpayOrderId: string,
-  ): Promise<Subscription>;
+    amountMinor: number,
+  ): Promise<SubscriptionOrder>;
   /** Called only from the verified webhook — never from the browser. */
   activateFromPayment(
     razorpayOrderId: string,
@@ -487,8 +533,31 @@ export interface ReferralRepository {
   /** Idempotent: returns the existing code or mints one. */
   getOrCreateCode(userId: string): Promise<Referral>;
   findByCode(code: string): Promise<Referral | null>;
-  /** Credits the owner of `code` for a new signup. */
-  applyCode(code: string, newUserId: string): Promise<Referral>;
+  /**
+   * Atomically records that `newUserId` was referred by `ownerUserId` and
+   * credits the owner.
+   *
+   * Deliberately MECHANICAL. This used to be `applyCode(code, newUserId)`,
+   * which also held four anti-fraud rules — unknown code, self-referral,
+   * reciprocal farming, already-applied — expressed as plain `Error` message
+   * strings that the gateway surfaced verbatim to the user. That put policy
+   * inside the swap boundary: a new database implementation had to re-derive
+   * all four rules *and* reproduce four exact English sentences, or the guards
+   * would vanish with no type error and no failing test.
+   *
+   * The rules now live in `referrals.service.ts`. What stays here is the one
+   * part that genuinely needs the database: claiming the referral and paying
+   * the reward in a single transaction, so two concurrent submissions cannot
+   * both credit the owner. `rewardPoints` is a parameter because the amount is
+   * a business decision, not a storage one.
+   *
+   * Throws `RepositoryConflictError` when a referral was already applied.
+   */
+  claimReferral(input: {
+    newUserId: string;
+    ownerUserId: string;
+    rewardPoints: number;
+  }): Promise<Referral>;
   stats(userId: string): Promise<{ signupCount: number; rewardPoints: number }>;
   leaderboard(limit?: number): Promise<
     (Referral & { name: string; avatarUrl?: string | null })[]

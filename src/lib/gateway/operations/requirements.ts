@@ -69,8 +69,14 @@ export const detail = defineOperation({
   name: "requirements.detail",
   kind: "query",
   access: "authenticated",
-  input: z.object({ id: z.string().min(1) }),
-  handler: ({ id }, { user }) => svc.getRequirementDetail(user, id),
+  input: z.object({
+    id: z.string().min(1),
+    // Which page of bids the owner is looking at. Ignored for non-owners,
+    // who only ever see their own bid.
+    bidsOffset: z.number().int().min(0).max(100_000).optional(),
+  }),
+  handler: ({ id, bidsOffset }, { user }) =>
+    svc.getRequirementDetail(user, id, bidsOffset ?? 0),
 });
 
 export const setStatus = defineOperation({

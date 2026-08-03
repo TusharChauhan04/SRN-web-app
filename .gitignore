@@ -47,6 +47,9 @@ prisma/*.db-journal
 prisma/dev.db*
 
 # local file uploads (StorageProvider "local" development mode)
+# NOT under public/ — see LOCAL_ROOT in src/lib/providers/storage/index.server.ts
+/.data
+# retained so an existing checkout's old upload directory is never committed
 /public/uploads
 
 # review agent scratch output

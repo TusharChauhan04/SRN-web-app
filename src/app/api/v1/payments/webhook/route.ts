@@ -54,13 +54,31 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true, applied: false });
   }
 
-  const result = await applyVerifiedPayment({
-    orderId: event.orderId,
-    paymentId: event.paymentId,
-    amountMinor: event.amountMinor,
-  });
+  let result;
+  try {
+    result = await applyVerifiedPayment({
+      orderId: event.orderId,
+      paymentId: event.paymentId,
+      amountMinor: event.amountMinor,
+    });
+  } catch (err) {
+    /*
+     * 500 ON PURPOSE, so the provider retries.
+     *
+     * The customer has already been charged at this point. The provider's retry
+     * schedule is the only thing that recovers a transient failure here, and
+     * answering 200 would discard it — leaving someone paid-up with no plan.
+     * Decided cases (unknown order, replay, mismatch) return normally below and
+     * are acknowledged.
+     */
+    console.error("[payments/webhook] failed to apply a captured payment", err);
+    return NextResponse.json(
+      { error: { code: "internal", message: "Retry" } },
+      { status: 500 },
+    );
+  }
 
-  // Always 200 once the signature is good. A non-2xx here would make the
-  // provider retry a payment we have already applied.
+  // 200 for every DECIDED outcome, including the ones we refuse to act on —
+  // retrying those would never succeed.
   return NextResponse.json({ received: true, ...result });
 }

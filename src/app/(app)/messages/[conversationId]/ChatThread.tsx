@@ -15,6 +15,16 @@ import { Avatar, Button, Input, Spinner, cn } from "@/components/ui";
 const MESSAGE_POLL_MS = 5_000;
 const PRESENCE_POLL_MS = 30_000;
 
+/**
+ * Cheap fingerprint of what the UI actually renders.
+ *
+ * Anything that changes the rendered output must be in here, or the poll will
+ * treat a real change as no change and silently stop updating.
+ */
+function digestOf(messages: Message[]): string {
+  return messages.map((m) => `${m.id}:${m.read ? 1 : 0}`).join(",");
+}
+
 interface ThreadResponse {
   messages: Message[];
   counterpartOnline: boolean;
@@ -67,16 +77,17 @@ export function ChatThread({
         if (cancelled) return;
 
         setMessages((previous) => {
-          // Only re-render when something actually changed, or every poll
-          // would rebuild the list and fight the scroll position.
-          const last = previous[previous.length - 1];
-          const incoming = data.messages[data.messages.length - 1];
-          if (
-            previous.length === data.messages.length &&
-            last?.id === incoming?.id
-          ) {
-            return previous;
-          }
+          /*
+           * Only re-render when something actually changed, or every poll
+           * rebuilds the list and fights the scroll position.
+           *
+           * The digest includes `read`, not just ids and length. Comparing
+           * only those meant a counterpart reading your messages changed
+           * neither — so the "· Read" label never appeared, because the poll
+           * classified a genuine change as no change.
+           */
+          if (digestOf(previous) === digestOf(data.messages)) return previous;
+
           if (pinnedToBottom.current) {
             requestAnimationFrame(() => scrollToBottom());
           }

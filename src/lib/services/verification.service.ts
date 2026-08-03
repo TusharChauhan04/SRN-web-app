@@ -7,6 +7,7 @@ import "server-only";
  * without this, the KYC queue could only ever be populated by the seed script.
  */
 import { repo } from "@/lib/repositories";
+import { RepositoryConflictError } from "@/lib/repositories/authorize";
 import {
   OTP_MAX_ATTEMPTS,
   OTP_TTL_MS,
@@ -90,10 +91,27 @@ export async function confirmPhoneVerification(
 
   await repo.phoneVerification.clear(actor.id);
 
-  const updated = await repo.users.update(actor.id, {
-    phone: challenge.phone,
-    phoneVerified: true,
-  });
+  let updated;
+  try {
+    updated = await repo.users.update(actor.id, {
+      phone: challenge.phone,
+      phoneVerified: true,
+    });
+  } catch (err) {
+    /*
+     * One phone number, one account.
+     *
+     * Deliberately checked HERE and not before the SMS is sent. An
+     * up-front check would answer "is this number registered?" to anyone who
+     * typed one in, which is a free account-enumeration oracle. Failing at
+     * confirmation costs one SMS and only tells someone who has already proven
+     * control of the number.
+     */
+    if (err instanceof RepositoryConflictError) {
+      throw GatewayError.conflict(err.message);
+    }
+    throw err;
+  }
 
   await repo.audit
     .record({ actorId: actor.id, action: "phone.verified", target: actor.id })
