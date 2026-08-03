@@ -80,7 +80,16 @@ Write-Output "  /admin (must redirect away) -> $(Get-Status $prov '/admin')"
 Write-Output "  api admin.overview (must be 403) -> $(Get-OpStatus $prov 'admin.overview' $null)"
 
 Write-Output "=== ADMIN ==="
-$admin = New-Session "boss@test.local"
+# Create the admin through the app, then promote it directly.
+#
+# The script used to assume a manually-promoted account existed. `pnpm db:seed`
+# wipes it, which made a fixture problem look exactly like an admin-routing
+# regression. A regression harness must not depend on hand-made state.
+$admin = New-Session "smoke-admin@test.local"
+Get-OpStatus $admin "auth.completeOnboarding" @{role = "customer"; name = "Smoke Admin" } | Out-Null
+node -e "const{PrismaClient}=require('@prisma/client');const p=new PrismaClient();p.user.updateMany({where:{email:'smoke-admin@test.local'},data:{role:'admin'}}).then(()=>p.`$disconnect())" | Out-Null
+# The role is read per request from the database, so the existing session
+# becomes an admin session without re-authenticating.
 foreach ($p in @("/", "/admin", "/admin/users", "/admin/disputes", "/admin/verification", "/admin/moderation", "/admin/fraud", "/admin/revenue", "/admin/flags", "/admin/audit", "/profile")) {
   Write-Output "  $p -> $(Get-Status $admin $p)"
 }

@@ -127,7 +127,7 @@ import type {
   User as PrismaUser,
   VerificationRequest as PrismaVerificationRequest,
   WorkingHours as PrismaWorkingHours,
-} from "@/generated/prisma";
+} from "@prisma/client";
 
 /*
  * Relations are declared EXPLICITLY per mapper rather than through a catch-all

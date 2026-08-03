@@ -11,7 +11,9 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+  // Default output (node_modules/.prisma/client), imported via "@prisma/client".
+  // A custom path under src/ sits inside the traced source tree, which made
+  // Turbopack attempt to trace the entire project on every build.
 }
 
 datasource db {

@@ -21,8 +21,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Prisma's generated client — not ours to lint.
-    "src/generated/**",
   ]),
 
   // ── UI layer: no data, no providers, no SDKs ──────────────────────────────
@@ -60,7 +58,6 @@ const eslintConfig = defineConfig([
                 "@/lib/repositories/prisma/*",
                 "@/lib/db",
                 "@/lib/db/*",
-                "@/generated/*",
               ],
               // `import type` is allowed: types carry no runtime code, so they
               // cannot drag the database into a bundle or skip a gateway check.
@@ -148,7 +145,7 @@ const eslintConfig = defineConfig([
         {
           patterns: [
             {
-              group: ["@/lib/repositories/prisma/*", "@/lib/db", "@/lib/db/*", "@/generated/*"],
+              group: ["@/lib/repositories/prisma/*", "@/lib/db", "@/lib/db/*"],
               message:
                 "The gateway calls services, which call repositories. It must not reach the Prisma layer itself.",
               allowTypeImports: true,
@@ -165,7 +162,6 @@ const eslintConfig = defineConfig([
     ignores: [
       "src/lib/repositories/prisma/**",
       "src/lib/db/**",
-      "src/generated/**",
       "src/app/**",
       "src/components/**",
       "src/lib/gateway/**",
@@ -179,7 +175,7 @@ const eslintConfig = defineConfig([
         {
           patterns: [
             {
-              group: ["@/generated/prisma", "@/generated/prisma/*", "@prisma/client", "@/lib/db", "@/lib/db/*"],
+              group: ["@prisma/client", "@/lib/db", "@/lib/db/*"],
               message:
                 "Prisma is confined to src/lib/repositories/prisma/ so the database stays swappable. See DATABASE.md.",
               allowTypeImports: true,
@@ -203,7 +199,6 @@ const eslintConfig = defineConfig([
     files: ["src/**/*.{ts,tsx}"],
     ignores: [
       "src/lib/providers/**",
-      "src/generated/**",
       // Covered by their own blocks above, which also restrict provider SDKs.
       "src/app/**",
       "src/components/**",

@@ -10,7 +10,7 @@
  * end-to-end, either sign in and then update that row's `role`, or set the
  * seeded id to your own Firebase uid. See DATABASE.md.
  */
-import { PrismaClient } from "../src/generated/prisma";
+import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 

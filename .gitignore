@@ -46,9 +46,6 @@ prisma/*.db
 prisma/*.db-journal
 prisma/dev.db*
 
-# Prisma client is generated at build time (see the build script)
-/src/generated
-
 # local file uploads (StorageProvider "local" development mode)
 /public/uploads
 

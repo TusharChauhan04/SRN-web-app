@@ -24,7 +24,7 @@ database.
    src/lib/repositories/prisma/*.ts     ← the ONLY code that knows about SQL
               │
               ▼
-   src/lib/db/client.ts  →  Prisma  →  SQLite (PLACEHOLDER)
+   src/lib/db/client.ts  →  @prisma/client  →  SQLite (PLACEHOLDER)
 ```
 
 **The rule:** no page, component, or Route Handler imports `PrismaClient`, the

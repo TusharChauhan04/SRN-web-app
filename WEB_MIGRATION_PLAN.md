@@ -221,7 +221,39 @@ Per brief §1.5, nothing here is silently dropped.
 | `react-native-vector-icons` (Feather) | most screens | **Port** → `lucide-react` (Feather-derived, same icon names). |
 | `react-native-linear-gradient` | ChatScreen, dashboards | **Port** → CSS `linear-gradient`. |
 
-### Web push decision: **DEFERRED**
+### Web push decision: **DEFERRED — confirmed at Phase 7**
+
+Re-examined at Phase 7 rather than inherited. The deferral stands, and here is
+the actual case rather than an assertion:
+
+**What users lose:** nothing they can currently see. All eleven notification
+types — quotes received/shortlisted/accepted, bookings, messages, reviews,
+disputes opened/resolved, verification approved/rejected, subscription active —
+write in-app notifications, visible at `/notifications`, and now dispatch email
+when the user opts in. Push would be a third delivery channel for events that
+already have two.
+
+**What mobile actually does:** its FCM registration is best-effort and swallows
+every error (`AuthContext.tsx:40-56`). Mobile does not depend on push either, so
+deferring is parity rather than a shortfall.
+
+**What enabling it needs:** a VAPID key pair, a registered
+`firebase-messaging-sw.js` service worker, a browser permission prompt, and a
+Firebase Web app in a project we do not yet have credentials for. All of that is
+new infrastructure, not code.
+
+**Why it is cheap to enable later:** the data path is already modelled.
+`User.fcmToken` exists in the schema and in `UpdateUserInput`, and `notify()` is
+a single function through which every notification already passes. Adding push
+is one delivery branch inside `notify()` plus a service worker — not a schema
+change and not eleven call sites.
+
+**Revisit when:** Firebase credentials land (§8.2), since the same project
+registration unblocks both this and real authentication.
+
+---
+
+#### Original assessment
 
 FCM web requires a registered `firebase-messaging-sw.js` service worker, a VAPID
 key pair, and a browser permission prompt — none of which exist yet, and the
