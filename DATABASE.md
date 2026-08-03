@@ -53,6 +53,10 @@ that's the abstraction leaking — fix it there rather than at the call site.
 These exist because SQLite lacks the types, and they are all isolated in
 `src/lib/repositories/prisma/mappers.ts`:
 
+Mapper inputs are typed against the generated Prisma models, so the compiler
+catches a column rename. The conversions below are what the mappers exist to
+do; the types make sure they are converting a field that still exists.
+
 | Want | SQLite has | Workaround | On Postgres |
 |---|---|---|---|
 | `string[]` (skills, privileges, evidence URLs) | no array type | comma-joined `String`, split in mappers | native `String[]`, drop the splitting |
@@ -167,13 +171,17 @@ pnpm db:deploy       # apply existing migrations (use in CI/production)
 After **any** schema change: run `pnpm db:migrate`, then `pnpm typecheck`, then
 `pnpm db:seed`.
 
-> **`typecheck` does not catch mapper drift.** `mappers.ts` types its input as
-> `Record<string, unknown>` and casts every field, so renaming a column
-> typechecks clean while the mapper silently returns `undefined`. The seed is
-> what actually catches it, because it writes and reads every table. Tightening
-> the mapper input types to `Prisma.*GetPayload<...>` is tracked as a fix —
-> Prisma types are permitted inside `repositories/prisma/`, which is exactly
-> where the mappers live.
+> **`typecheck` now catches mapper drift.** `mappers.ts` types each row against
+> the generated Prisma model, with `include`d relations declared explicitly, so
+> renaming a column fails the build at the mapper rather than silently returning
+> `undefined`. Verified by injecting a rename and confirming it errors.
+>
+> Note what did NOT work, since it looks correct: typing rows as
+> `PrismaModel & Record<string, unknown>` to allow relations through. The index
+> signature makes every property access legal, so drift still typechecked. If
+> you add a mapper, name its relations — do not reach for a catch-all.
+>
+> The seed remains a second line of defence for anything types cannot express.
 
 ---
 

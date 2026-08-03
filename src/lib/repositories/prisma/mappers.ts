@@ -91,11 +91,100 @@ export function stringifyJson(
   return JSON.stringify(value);
 }
 
-// Prisma row types are structural here so this file does not depend on the
-// generated client's exact export names.
+/*
+ * Rows are typed against the GENERATED Prisma models, not `Record<string,
+ * unknown>`.
+ *
+ * This matters: with a loose row type, renaming a column in schema.prisma
+ * typechecks clean and the mapper silently returns `undefined` for that field —
+ * a data-shaped bug that reaches the UI as a blank value rather than an error.
+ * Typing the input means the build breaks at the mapper instead.
+ *
+ * `WithRelations` widens each model so an `include`d relation (which Prisma
+ * types per-query) can still be read off the row. The MODEL's own columns stay
+ * strictly typed, which is where drift actually happens.
+ */
+import type {
+  AuditEvent as PrismaAuditEvent,
+  BlockedDate as PrismaBlockedDate,
+  Booking as PrismaBooking,
+  Conversation as PrismaConversation,
+  Dispute as PrismaDispute,
+  FeatureFlag as PrismaFeatureFlag,
+  Message as PrismaMessage,
+  Notification as PrismaNotification,
+  NotificationPref as PrismaNotificationPref,
+  PhoneVerification as PrismaPhoneVerification,
+  PortfolioItem as PrismaPortfolioItem,
+  Presence as PrismaPresence,
+  Quote as PrismaQuote,
+  Referral as PrismaReferral,
+  Report as PrismaReport,
+  Requirement as PrismaRequirement,
+  Review as PrismaReview,
+  Subscription as PrismaSubscription,
+  Upload as PrismaUpload,
+  User as PrismaUser,
+  VerificationRequest as PrismaVerificationRequest,
+  WorkingHours as PrismaWorkingHours,
+} from "@/generated/prisma";
+
+/*
+ * Relations are declared EXPLICITLY per mapper rather than through a catch-all
+ * index signature.
+ *
+ * A first attempt used `T & Record<string, unknown>`, which looked right and
+ * did nothing: the index signature makes every property access legal, so a
+ * renamed column still typechecked. Only probing it with a deliberate rename
+ * exposed that. Naming each relation is more typing and is the only version
+ * that actually fails the build on drift.
+ */
+type UserSummaryRow = Pick<PrismaUser, "id" | "name" | "avatarUrl" | "role">;
+
+type RequirementRow = PrismaRequirement & {
+  creator?: UserSummaryRow | null;
+  _count?: { quotes?: number };
+};
+
+type QuoteRow = PrismaQuote & {
+  sender?: Pick<
+    PrismaUser,
+    "id" | "name" | "avatarUrl" | "rating" | "title"
+  > | null;
+  requirement?: Pick<PrismaRequirement, "id" | "title" | "maxBudget"> | null;
+};
+
+type BookingRow = PrismaBooking & {
+  customer?: Pick<PrismaUser, "id" | "name" | "avatarUrl"> | null;
+  provider?: Pick<PrismaUser, "id" | "name" | "avatarUrl"> | null;
+  requirement?: Pick<PrismaRequirement, "id" | "title"> | null;
+  review?: { id: string } | null;
+};
+
+type ReviewRow = PrismaReview & {
+  author?: Pick<PrismaUser, "id" | "name" | "avatarUrl"> | null;
+};
+
+type DisputeRow = PrismaDispute & {
+  raisedBy?: Pick<PrismaUser, "id" | "name" | "avatarUrl"> | null;
+  booking?: Pick<
+    PrismaBooking,
+    "id" | "amount" | "customerId" | "providerId"
+  > | null;
+};
+
+type VerificationRow = PrismaVerificationRequest & {
+  user?: Pick<PrismaUser, "id" | "name" | "email" | "role" | "avatarUrl"> | null;
+};
+
+type AuditRow = PrismaAuditEvent & {
+  actor?: Pick<PrismaUser, "id" | "name" | "email"> | null;
+};
+
+/** Only for the PII-safe projection, which is a `select` and not a full row. */
 type Row = Record<string, unknown>;
 
-export function toUser(row: Row): User {
+export function toUser(row: PrismaUser): User {
   return {
     id: row.id as string,
     email: row.email as string,
@@ -194,7 +283,7 @@ export function toUserSummary(row: Row | null | undefined) {
   };
 }
 
-export function toRequirement(row: Row): Requirement {
+export function toRequirement(row: RequirementRow): Requirement {
   const creator = row.creator as Row | undefined;
   const count = row._count as { quotes?: number } | undefined;
   return {
@@ -215,7 +304,7 @@ export function toRequirement(row: Row): Requirement {
   };
 }
 
-export function toQuote(row: Row): Quote {
+export function toQuote(row: QuoteRow): Quote {
   const sender = row.sender as Row | undefined;
   const requirement = row.requirement as Row | undefined;
   return {
@@ -249,7 +338,7 @@ export function toQuote(row: Row): Quote {
   };
 }
 
-export function toBooking(row: Row): Booking {
+export function toBooking(row: BookingRow): Booking {
   const customer = row.customer as Row | undefined;
   const provider = row.provider as Row | undefined;
   const requirement = row.requirement as Row | undefined;
@@ -286,7 +375,7 @@ export function toBooking(row: Row): Booking {
   };
 }
 
-export function toReview(row: Row): Review {
+export function toReview(row: ReviewRow): Review {
   const author = row.author as Row | undefined;
   return {
     id: row.id as string,
@@ -307,7 +396,7 @@ export function toReview(row: Row): Review {
   };
 }
 
-export function toConversation(row: Row): Conversation {
+export function toConversation(row: PrismaConversation): Conversation {
   return {
     id: row.id as string,
     participantIds: splitList(row.participantIds as string),
@@ -317,7 +406,7 @@ export function toConversation(row: Row): Conversation {
   };
 }
 
-export function toMessage(row: Row): Message {
+export function toMessage(row: PrismaMessage): Message {
   return {
     id: row.id as string,
     conversationId: row.conversationId as string,
@@ -335,7 +424,7 @@ export function toMessage(row: Row): Message {
   };
 }
 
-export function toDispute(row: Row): Dispute {
+export function toDispute(row: DisputeRow): Dispute {
   const raisedBy = row.raisedBy as Row | undefined;
   const booking = row.booking as Row | undefined;
   return {
@@ -369,7 +458,7 @@ export function toDispute(row: Row): Dispute {
   };
 }
 
-export function toVerificationRequest(row: Row): VerificationRequest {
+export function toVerificationRequest(row: VerificationRow): VerificationRequest {
   const user = row.user as Row | undefined;
   return {
     id: row.id as string,
@@ -393,7 +482,7 @@ export function toVerificationRequest(row: Row): VerificationRequest {
   };
 }
 
-export function toPortfolioItem(row: Row): PortfolioItem {
+export function toPortfolioItem(row: PrismaPortfolioItem): PortfolioItem {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -408,7 +497,7 @@ export function toPortfolioItem(row: Row): PortfolioItem {
   };
 }
 
-export function toWorkingHours(row: Row): WorkingHours {
+export function toWorkingHours(row: PrismaWorkingHours): WorkingHours {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -419,7 +508,7 @@ export function toWorkingHours(row: Row): WorkingHours {
   };
 }
 
-export function toBlockedDate(row: Row): BlockedDate {
+export function toBlockedDate(row: PrismaBlockedDate): BlockedDate {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -428,7 +517,7 @@ export function toBlockedDate(row: Row): BlockedDate {
   };
 }
 
-export function toSubscription(row: Row): Subscription {
+export function toSubscription(row: PrismaSubscription): Subscription {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -443,7 +532,7 @@ export function toSubscription(row: Row): Subscription {
   };
 }
 
-export function toNotification(row: Row): Notification {
+export function toNotification(row: PrismaNotification): Notification {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -456,7 +545,7 @@ export function toNotification(row: Row): Notification {
   };
 }
 
-export function toNotificationPrefs(row: Row): NotificationPrefs {
+export function toNotificationPrefs(row: PrismaNotificationPref): NotificationPrefs {
   return {
     userId: row.userId as string,
     push: Boolean(row.push),
@@ -468,7 +557,7 @@ export function toNotificationPrefs(row: Row): NotificationPrefs {
   };
 }
 
-export function toReferral(row: Row): Referral {
+export function toReferral(row: PrismaReferral): Referral {
   return {
     userId: row.userId as string,
     code: row.code as string,
@@ -479,7 +568,7 @@ export function toReferral(row: Row): Referral {
   };
 }
 
-export function toPresence(row: Row): Presence {
+export function toPresence(row: PrismaPresence): Presence {
   return {
     userId: row.userId as string,
     isOnline: Boolean(row.isOnline),
@@ -487,7 +576,7 @@ export function toPresence(row: Row): Presence {
   };
 }
 
-export function toUpload(row: Row): Upload {
+export function toUpload(row: PrismaUpload): Upload {
   return {
     id: row.id as string,
     userId: row.userId as string,
@@ -503,7 +592,7 @@ export function toUpload(row: Row): Upload {
   };
 }
 
-export function toAuditEvent(row: Row): AuditEvent {
+export function toAuditEvent(row: AuditRow): AuditEvent {
   const actor = row.actor as Row | undefined;
   return {
     id: row.id as string,
@@ -523,7 +612,7 @@ export function toAuditEvent(row: Row): AuditEvent {
   };
 }
 
-export function toFeatureFlag(row: Row): FeatureFlag {
+export function toFeatureFlag(row: PrismaFeatureFlag): FeatureFlag {
   return {
     key: row.key as string,
     enabled: Boolean(row.enabled),
@@ -532,7 +621,7 @@ export function toFeatureFlag(row: Row): FeatureFlag {
   };
 }
 
-export function toReport(row: Row): Report {
+export function toReport(row: PrismaReport): Report {
   return {
     id: row.id as string,
     reporterId: row.reporterId as string,
@@ -547,7 +636,7 @@ export function toReport(row: Row): Report {
   };
 }
 
-export function toPhoneChallenge(row: Row) {
+export function toPhoneChallenge(row: PrismaPhoneVerification) {
   return {
     userId: row.userId as string,
     phone: row.phone as string,
