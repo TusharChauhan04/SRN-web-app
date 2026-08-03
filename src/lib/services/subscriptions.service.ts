@@ -12,6 +12,7 @@ import "server-only";
  *     works the same way, so this is parity, not new caution.
  */
 import { repo } from "@/lib/repositories";
+import { notify } from "./notify.service";
 import {
   CURRENCY,
   TIER_PRICES_MINOR,
@@ -217,14 +218,12 @@ export async function applyVerifiedPayment(input: {
       periodEnd,
     );
 
-    await repo.notifications
-      .create({
+    await notify({
         userId: subscription.userId,
         type: "subscription_active",
         title: "Subscription active",
         body: `You're now on the ${subscription.tier} plan.`,
-      })
-      .catch(() => {});
+      });
 
     await repo.audit
       .record({

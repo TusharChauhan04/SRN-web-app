@@ -13,6 +13,7 @@ import "server-only";
  * a compliance question as who approved something in it.
  */
 import { repo } from "@/lib/repositories";
+import { notify } from "./notify.service";
 import type {
   AuditEvent,
   Dispute,
@@ -263,15 +264,13 @@ export async function resolveDispute(
   if (booking) {
     await Promise.all(
       [booking.customerId, booking.providerId].map((userId) =>
-        repo.notifications
-          .create({
-            userId,
-            type: "dispute_resolved",
-            title: `Dispute ${outcome}`,
-            body: resolution.slice(0, 200),
-            data: { bookingId: booking.id, disputeId },
-          })
-          .catch(() => {}),
+        notify({
+          userId,
+          type: "dispute_resolved",
+          title: `Dispute ${outcome}`,
+          body: resolution.slice(0, 200),
+          data: { bookingId: booking.id, disputeId },
+        }),
       ),
     );
   }
@@ -351,14 +350,12 @@ export async function approveVerification(
 ): Promise<VerificationRequest> {
   const request = await repo.verification.approve(requestId, actor, note);
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: request.userId,
       type: "verification_approved",
       title: "You're verified",
       body: "Your identity documents were approved.",
-    })
-    .catch(() => {});
+    });
 
   await repo.audit
     .record({
@@ -379,14 +376,12 @@ export async function rejectVerification(
 ): Promise<VerificationRequest> {
   const request = await repo.verification.reject(requestId, actor, note);
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: request.userId,
       type: "verification_rejected",
       title: "Verification needs attention",
       body: note.slice(0, 200),
-    })
-    .catch(() => {});
+    });
 
   await repo.audit
     .record({

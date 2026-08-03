@@ -8,6 +8,7 @@ import "server-only";
  * whether they may touch this particular row is this layer's job.
  */
 import { repo } from "@/lib/repositories";
+import { notify } from "./notify.service";
 import {
   isProviderRole,
   isSeekerRole,
@@ -238,15 +239,13 @@ export async function submitQuote(
   });
 
   // Tell the owner. Best effort — a failed notification must not lose the bid.
-  await repo.notifications
-    .create({
+  await notify({
       userId: requirement.creatorId,
       type: "quote_received",
       title: "New quote on your requirement",
       body: `${actor.name} quoted for "${requirement.title}".`,
       data: { requirementId: requirement.id, quoteId: quote.id },
-    })
-    .catch(() => {});
+    });
 
   return quote;
 }
@@ -291,15 +290,13 @@ export async function shortlistQuote(
 
   const updated = await repo.quotes.shortlist(quote.requirementId, quoteId);
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: quote.senderId,
       type: "quote_shortlisted",
       title: "You've been shortlisted",
       body: `${actor.name} shortlisted your quote.`,
       data: { quoteId },
-    })
-    .catch(() => {});
+    });
 
   return updated;
 }

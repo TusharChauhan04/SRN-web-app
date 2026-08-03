@@ -7,6 +7,7 @@ import "server-only";
  * to port. See WEB_MIGRATION_PLAN.md §0.1 for the evidence.
  */
 import { repo } from "@/lib/repositories";
+import { notify } from "./notify.service";
 import type { Conversation, Message, User } from "@/lib/repositories/types";
 import { GatewayError } from "@/lib/gateway/types";
 
@@ -100,15 +101,13 @@ export async function sendMessage(
     conversationId: input.conversationId,
   });
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: input.recipientId,
       type: "message",
       title: "New message",
       body: `${actor.name} sent you a message.`,
       data: { conversationId: message.conversationId },
-    })
-    .catch(() => {});
+    });
 
   return message;
 }

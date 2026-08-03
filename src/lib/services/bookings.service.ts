@@ -8,6 +8,7 @@ import "server-only";
  * sequence lives here rather than in a page so it can't be half-performed.
  */
 import { repo } from "@/lib/repositories";
+import { notify } from "./notify.service";
 import type {
   Booking,
   BookingStatus,
@@ -73,15 +74,13 @@ export async function acceptQuote(
       .map((q) => repo.quotes.updateStatus(q.id, "rejected").catch(() => {})),
   );
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: quote.senderId,
       type: "quote_accepted",
       title: "Your quote was accepted",
       body: `${actor.name} accepted your quote. The booking is confirmed.`,
       data: { bookingId: booking.id },
-    })
-    .catch(() => {});
+    });
 
   await repo.audit
     .record({
@@ -152,15 +151,13 @@ export async function updateBookingStatus(
       .catch(() => {
         // Direct bookings have no requirement; nothing to close.
       });
-    await repo.notifications
-      .create({
+    await notify({
         userId: booking.customerId,
         type: "booking_completed",
         title: "Booking completed",
         body: "Your booking is marked complete. Leave a review?",
         data: { bookingId },
-      })
-      .catch(() => {});
+      });
   }
 
   return updated;
@@ -194,15 +191,13 @@ export async function createReview(
     comment: input.comment,
   });
 
-  await repo.notifications
-    .create({
+  await notify({
       userId: booking.providerId,
       type: "review_received",
       title: "New review",
       body: `${actor.name} left you a ${input.rating}-star review.`,
       data: { bookingId: input.bookingId },
-    })
-    .catch(() => {});
+    });
 
   return review;
 }
@@ -242,15 +237,13 @@ export async function raiseDispute(
   // Tell the other party, whoever that is relative to the raiser.
   const otherParty =
     booking.customerId === actor.id ? booking.providerId : booking.customerId;
-  await repo.notifications
-    .create({
+  await notify({
       userId: otherParty,
       type: "dispute_opened",
       title: "A dispute was raised",
       body: `${actor.name} raised a dispute on your booking.`,
       data: { bookingId: input.bookingId, disputeId: dispute.id },
-    })
-    .catch(() => {});
+    });
 
   await repo.audit
     .record({
