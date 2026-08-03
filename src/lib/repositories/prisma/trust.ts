@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/db/client";
-import { assertAdmin, type Actor } from "../authorize";
+import {
+  SYSTEM_ACTOR,
+  assertAdmin,
+  assertSelfOrAdmin,
+  type Actor,
+} from "../authorize";
 import type {
   CreateDisputeInput,
   CreateVerificationInput,
@@ -108,11 +113,18 @@ export class PrismaDisputeRepository implements DisputeRepository {
     return { items: items.map(toDispute), total, limit, offset };
   }
 
-  async addEvidence(id: string, urls: string[]): Promise<Dispute> {
+  async addEvidence(
+    id: string,
+    urls: string[],
+    actor: Actor,
+  ): Promise<Dispute> {
     const existing = await prisma.dispute.findUnique({
       where: { id },
-      select: { evidenceUrls: true },
+      select: { evidenceUrls: true, raisedById: true },
     });
+    if (!existing) throw new Error("Dispute not found");
+    // Only the person who raised it (or an admin) may add to it.
+    assertSelfOrAdmin(actor, existing.raisedById, "dispute.addEvidence");
     const merged = [...splitList(existing?.evidenceUrls ?? null), ...urls];
 
     const row = await prisma.dispute.update({
@@ -126,9 +138,11 @@ export class PrismaDisputeRepository implements DisputeRepository {
   async resolve(
     id: string,
     resolution: string,
-    resolvedById: string,
+    actor: Actor,
     status: Extract<DisputeStatus, "resolved" | "rejected">,
   ): Promise<Dispute> {
+    assertAdmin(actor, "dispute.resolve");
+    const resolvedById = actor === SYSTEM_ACTOR ? null : actor.id;
     const existing = await prisma.dispute.findUnique({
       where: { id },
       select: { bookingId: true, previousBookingStatus: true, status: true },
@@ -242,9 +256,11 @@ export class PrismaVerificationRepository implements VerificationRepository {
 
   async approve(
     id: string,
-    reviewedById: string,
+    actor: Actor,
     note?: string,
   ): Promise<VerificationRequest> {
+    assertAdmin(actor, "verification.approve");
+    const reviewedById = actor === SYSTEM_ACTOR ? null : actor.id;
     const existing = await prisma.verificationRequest.findUnique({
       where: { id },
       select: { userId: true, status: true },
@@ -279,9 +295,11 @@ export class PrismaVerificationRepository implements VerificationRepository {
 
   async reject(
     id: string,
-    reviewedById: string,
+    actor: Actor,
     note: string,
   ): Promise<VerificationRequest> {
+    assertAdmin(actor, "verification.reject");
+    const reviewedById = actor === SYSTEM_ACTOR ? null : actor.id;
     const existing = await prisma.verificationRequest.findUnique({
       where: { id },
       select: { userId: true, status: true },

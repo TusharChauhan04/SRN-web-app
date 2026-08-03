@@ -153,6 +153,16 @@ export async function completeOnboarding(
   return user;
 }
 
+/**
+ * Invalidates every outstanding session for a user.
+ *
+ * Used when an account is suspended, so the credential stops working at the
+ * provider rather than relying solely on our own database check.
+ */
+export async function revokeUserSessions(uid: string): Promise<void> {
+  await authProvider().revokeSessions(uid);
+}
+
 /** Deletes the identity record. Used by GDPR erasure, after data anonymisation. */
 export async function deleteIdentity(uid: string): Promise<void> {
   await authProvider().deleteIdentity(uid);

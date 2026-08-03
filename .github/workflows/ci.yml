@@ -55,6 +55,11 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Tests
+        # Regression tests for bugs that actually shipped or nearly shipped.
+        # They run against a scratch SQLite database, not prisma/dev.db.
+        run: pnpm test
+
       - name: Production build
         run: pnpm build
 

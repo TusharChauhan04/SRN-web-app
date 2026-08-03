@@ -28,7 +28,7 @@ import type {
   VerificationRequest,
 } from "@/lib/repositories/types";
 import { GatewayError } from "@/lib/gateway/types";
-import { deleteIdentity } from "./auth.service";
+import { deleteIdentity, revokeUserSessions } from "./auth.service";
 
 // ─────────────────────────── Dashboard ───────────────────────────
 
@@ -124,6 +124,28 @@ export async function setUserSuspended(
   }
 
   const updated = await repo.users.setSuspended(userId, suspended, actor);
+
+  /*
+   * Revoke at the identity provider too, not just in our database.
+   *
+   * Suspension already "works" because getSession re-reads the row and returns
+   * null for a suspended user — but that makes one function the single thing
+   * standing between a suspended account and a live session. Revoking the
+   * provider's sessions means the credential itself stops working, so any
+   * future code path that verifies a cookie without going through getSession
+   * still refuses them.
+   *
+   * Best effort: a provider outage must not block the suspension itself, which
+   * is the part that takes effect immediately.
+   */
+  if (suspended) {
+    await revokeUserSessions(userId).catch((err) => {
+      console.error(
+        `[admin] suspended ${userId} but could not revoke their sessions:`,
+        err,
+      );
+    });
+  }
 
   await repo.audit
     .record({
@@ -232,7 +254,7 @@ export async function resolveDispute(
   const dispute = await repo.disputes.resolve(
     disputeId,
     resolution,
-    actor.id,
+    actor,
     outcome,
   );
 
@@ -327,7 +349,7 @@ export async function approveVerification(
   requestId: string,
   note?: string,
 ): Promise<VerificationRequest> {
-  const request = await repo.verification.approve(requestId, actor.id, note);
+  const request = await repo.verification.approve(requestId, actor, note);
 
   await repo.notifications
     .create({
@@ -355,7 +377,7 @@ export async function rejectVerification(
   requestId: string,
   note: string,
 ): Promise<VerificationRequest> {
-  const request = await repo.verification.reject(requestId, actor.id, note);
+  const request = await repo.verification.reject(requestId, actor, note);
 
   await repo.notifications
     .create({

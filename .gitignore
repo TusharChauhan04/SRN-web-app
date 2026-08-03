@@ -55,3 +55,6 @@ prisma/dev.db*
 # review agent scratch output
 .claude/review-logs/
 .claude/agent-memory/
+
+# vitest scratch database
+prisma/test.db*

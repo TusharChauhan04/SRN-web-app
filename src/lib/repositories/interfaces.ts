@@ -335,11 +335,13 @@ export interface DisputeRepository {
   create(input: CreateDisputeInput): Promise<Dispute>;
   findById(id: string): Promise<Dispute | null>;
   list(filter?: ListDisputesFilter): Promise<Page<Dispute>>;
-  addEvidence(id: string, urls: string[]): Promise<Dispute>;
+  /** Scoped to the raiser (or an admin) — evidence is not open to anyone. */
+  addEvidence(id: string, urls: string[], actor: Actor): Promise<Dispute>;
+  /** Admin-only. Asserts on `actor` as well as recording it. */
   resolve(
     id: string,
     resolution: string,
-    resolvedById: string,
+    actor: Actor,
     status: Extract<DisputeStatus, "resolved" | "rejected">,
   ): Promise<Dispute>;
   countOpen(): Promise<number>;
@@ -360,17 +362,12 @@ export interface VerificationRepository {
   listQueue(
     filter?: PageParams & { status?: VerificationStatus },
   ): Promise<Page<VerificationRequest>>;
-  /** Approving also flips the user's isVerified flag. */
-  approve(
-    id: string,
-    reviewedById: string,
-    note?: string,
-  ): Promise<VerificationRequest>;
-  reject(
-    id: string,
-    reviewedById: string,
-    note: string,
-  ): Promise<VerificationRequest>;
+  /**
+   * Approving also flips the user's isVerified flag. Admin-only: asserts on
+   * `actor` rather than merely recording whoever the caller claims to be.
+   */
+  approve(id: string, actor: Actor, note?: string): Promise<VerificationRequest>;
+  reject(id: string, actor: Actor, note: string): Promise<VerificationRequest>;
   countPending(): Promise<number>;
 }
 
