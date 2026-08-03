@@ -12,6 +12,10 @@ import { NextResponse } from "next/server";
 import { authProvider } from "@/lib/providers/auth/index.server";
 import { paymentProvider } from "@/lib/providers/payments/index.server";
 import { repo } from "@/lib/repositories";
+import {
+  checkConfiguration,
+  fatalProblems,
+} from "@/lib/config/preflight";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +44,12 @@ export async function GET() {
     console.error("[healthz] payment provider unavailable:", err);
   }
 
-  const healthy = databaseReachable && auth.configured;
+  // A reachable database is not the same as a deployable one: SQLite on
+  // serverless answers this check happily right up until it loses the data.
+  const configProblems = checkConfiguration();
+  const fatal = fatalProblems(configProblems);
+
+  const healthy = databaseReachable && auth.configured && fatal.length === 0;
 
   return NextResponse.json(
     {
@@ -49,6 +58,10 @@ export async function GET() {
         database: databaseReachable ? "up" : "down",
         auth,
         payments,
+        configuration:
+          configProblems.length === 0
+            ? "ok"
+            : configProblems.map((p) => `${p.severity}: ${p.setting}`),
       },
       latencyMs: Date.now() - startedAt,
       timestamp: new Date().toISOString(),

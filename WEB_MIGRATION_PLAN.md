@@ -2,7 +2,7 @@
 
 **Source:** `SRN-mobile` (React Native 0.81.5, RN Firebase, react-navigation v7)
 **Target:** `SRN-web-app` — Next.js App Router + TypeScript
-**Status:** Phases 0–6 done. All 33 mobile screens converted. Phases 7–8 (web push decision, deployment checklist) remain, then the final audit.
+**Status:** Phases 0–8 complete. All 33 mobile screens converted. The final review and audit is the remaining step.
 **Last updated:** 2026-08-01
 
 ## Resume here
@@ -380,14 +380,14 @@ Status: Not Started / In Progress / Ported / Reviewed / Done / Blocked.
 
 | Item | Status | Notes |
 |---|---|---|
-| `next build` clean | Not Started | |
-| `.env.example` complete | Not Started | |
-| Secrets gitignored | Not Started | |
-| Health endpoint | Not Started | Phase 1 |
-| Security headers + rate limiting | **Done** | CSP landed with the payment page, not after it — Razorpay injects a script and an iframe |
-| Hosting target decision | Not Started | Vercel default; SQLite-on-serverless caveat — see `DATABASE.md` |
-| CI production build check | Not Started | |
-| README deploy instructions | Not Started | |
+| `next build` clean | **Done** | Zero warnings. The Prisma client was moved to its default output; a custom path under src/ made Turbopack trace the whole project |
+| `.env.example` complete | **Done** | 26 variables, each with what it is for and what breaks without it |
+| Secrets gitignored | **Done** | `.env*` ignored except `.env.example`; verified nothing is tracked |
+| Health endpoint | **Done** | Reports database reachability, provider status, AND configuration problems; 503 when any are fatal |
+| Security headers + rate limiting | **Done** | CSP landed with the payment page rather than after it; 5 rate tiers through the gateway |
+| Hosting target decision | **Needs a human** | Preflight refuses SQLite in production rather than letting it fail silently. See below |
+| CI production build check | **Done** | 10 steps: typecheck, lint, tests, preflight, build, seed |
+| README deploy instructions | **Done** | Includes the preflight gate |
 
 ---
 
@@ -490,6 +490,36 @@ not forgotten):
 | No tests, no test runner | Blocks `test-generater` / `test-executor` from being useful |
 | `components/ui.tsx` is one file exporting ~12 components | Split to `components/ui/` before Phase 3 |
 
+
+---
+
+## 8b. The hosting decision — the one thing still blocking a real deploy
+
+The app is deployable the moment a database is pointed at it. What it will not
+do is pretend SQLite is fine.
+
+`pnpm preflight` (and `/api/healthz`) treat these as FATAL in production:
+
+| Setting | Why it is fatal rather than a warning |
+|---|---|
+| `DATABASE_URL` starting `file:` | Serverless filesystems are ephemeral and per-instance. Rows vanish on cold start and are not shared between instances. Nothing errors |
+| `AUTH_PROVIDER=mock` | Authenticates anyone as anyone |
+| `PAYMENT_PROVIDER=mock` | Grants paid plans without taking payment |
+| `OTP_PROVIDER=console` | Reveals the verification code to whoever asked for it |
+| `STORAGE_PROVIDER=local` | Loses every upload, including KYC identity documents |
+| Missing `NEXT_PUBLIC_APP_URL` | Disables the cross-origin check that prevents login CSRF |
+
+Every one of those would look like a working deployment for a while. That is
+precisely why they are checked rather than trusted.
+
+**Two viable paths, and this is your call:**
+
+1. **Hosted Postgres (recommended).** Neon, Supabase or Vercel Postgres. This is
+   the Case A procedure in `DATABASE.md` §3 and can happen *before* the real
+   database decision — it is a provider swap plus a connection string, not a
+   commitment.
+2. **Somewhere with a persistent disk** (Railway, Fly, a VM). Keeps SQLite
+   viable, but only for a single instance.
 
 ---
 

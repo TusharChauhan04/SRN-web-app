@@ -121,6 +121,8 @@ Check http://localhost:3000/api/healthz for database and provider status.
 | `pnpm db:seed` | Wipe and re-seed **(destructive)** |
 | `pnpm db:reset` | Drop, re-migrate, re-seed **(destructive)** |
 | `pnpm db:deploy` | Apply existing migrations — use this in CI/production |
+| `pnpm test` | Regression tests against a scratch database |
+| `pnpm preflight` | Check the environment is safe to deploy with |
 
 ---
 
@@ -140,6 +142,21 @@ So the first deployment needs one of:
   *before* the real database decision is made. **Recommended.**
 - **Deploy somewhere with a persistent disk** (Railway, Fly.io, a VM), which
   keeps SQLite viable but only for a single instance.
+
+### Check before you deploy
+
+```bash
+NODE_ENV=production DATABASE_URL="<real url>" pnpm preflight
+```
+
+Exits non-zero on anything that would break silently — SQLite in production, a
+development auth or payment provider, local file storage, a missing
+`NEXT_PUBLIC_APP_URL`. Every one of those looks like a working deployment for a
+while and then loses data or authenticates the wrong person, which is exactly
+why they are checked rather than trusted.
+
+`/api/healthz` runs the same checks and returns 503 if any are fatal, so a
+platform health check catches a misconfiguration even if nobody ran preflight.
 
 ### Deploying to Vercel
 

@@ -60,6 +60,12 @@ jobs:
         # They run against a scratch SQLite database, not prisma/dev.db.
         run: pnpm test
 
+      - name: Preflight (development env must be clean)
+        # The same checks that gate a real deploy. Running them here catches a
+        # broken check, not a broken deployment — the production paths are
+        # covered by tests/preflight.test.ts.
+        run: pnpm preflight
+
       - name: Production build
         run: pnpm build
 
