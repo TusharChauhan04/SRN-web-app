@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { AuthProvider } from "@/lib/auth/AuthContext";
 import { Sidebar } from "@/components/nav/Sidebar";
+import { BackgroundWash } from "@/components/ui";
+import { ROLE_COLORS } from "@/lib/repositories/types";
 
 /**
  * Authenticated shell.
@@ -24,6 +26,12 @@ export default async function AppLayout({
 
   return (
     <AuthProvider initialUser={session.user}>
+      {/*
+        Role-tinted wash, matching mobile's per-role OrbBackground. Rendered
+        once in the shell rather than per screen — mobile repeats it in 25
+        files, which is duplication we don't need to port along with the look.
+      */}
+      <BackgroundWash color={ROLE_COLORS[session.user.role]} />
       <div className="flex min-h-screen flex-col lg:flex-row">
         <Sidebar user={session.user} />
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

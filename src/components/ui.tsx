@@ -142,6 +142,52 @@ export function CardHeader({
   );
 }
 
+/**
+ * The role-tinted background wash, ported from mobile's `OrbBackground`
+ * (mobile src/components/ui.tsx:247).
+ *
+ * Mobile draws two soft radial `LinearGradient` circles bleeding off the
+ * corners — `[roleColor + "10", "transparent"]` top-right and
+ * `[teal + "08", "transparent"]` bottom-left, 280px, radius 140. Twenty-five
+ * mobile files use it and it is most of why the app reads as tinted per role
+ * rather than flat white. It was listed as "Port → CSS linear-gradient" in the
+ * migration plan and then not actually done, so every web screen was flat.
+ *
+ * `radial-gradient` is the honest equivalent of a circular RN gradient; a
+ * literal `linear-gradient` would give a hard-edged band. The hex suffixes are
+ * the same 8-bit alphas mobile uses (10 ≈ 6%, 08 ≈ 3%).
+ *
+ * `aria-hidden` and `pointer-events-none`: this is decoration, and it must not
+ * appear in the accessibility tree or intercept a click.
+ */
+export function BackgroundWash({
+  color = "var(--primary)",
+  color2 = "var(--accent, #0d9488)",
+}: {
+  color?: string;
+  color2?: string;
+}) {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+    >
+      <div
+        className="absolute -top-[100px] -right-[70px] h-[280px] w-[280px] rounded-full"
+        style={{
+          background: `radial-gradient(circle, color-mix(in srgb, ${color} 6%, transparent) 0%, transparent 70%)`,
+        }}
+      />
+      <div
+        className="absolute -bottom-[80px] -left-[70px] h-[280px] w-[280px] rounded-full"
+        style={{
+          background: `radial-gradient(circle, color-mix(in srgb, ${color2} 3%, transparent) 0%, transparent 70%)`,
+        }}
+      />
+    </div>
+  );
+}
+
 export function PageHeader({
   title,
   description,

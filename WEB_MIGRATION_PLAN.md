@@ -206,11 +206,16 @@ listing lives in `DATABASE.md` once Phase 1 lands.
 
 Per brief §1.5, nothing here is silently dropped.
 
+> **Verified against the mobile source, not against this table.** Two rows here
+> claimed "Port" for work that had not been done — chat clipboard and the
+> gradients. Both are now genuinely implemented. A row in this table is not
+> evidence; the grep is.
+
 | Mobile | Location | Decision |
 |---|---|---|
 | `Platform.OS` keyboard avoidance | 6 screens | **Drop** — no web equivalent needed; keyboard avoidance is a mobile-only concern. |
 | `KeyboardAwareScrollViewCompat` | `components/` | **Drop** — already no-ops on web (`Platform.OS === "web"` branch exists). |
-| `@react-native-clipboard/clipboard` | ChatScreen, ReferralsScreen | **Port** → `navigator.clipboard.writeText` with a fallback. |
+| `@react-native-clipboard/clipboard` | ChatScreen, ReferralsScreen | **Ported (both).** Referrals landed first; ChatScreen was missed and caught by re-auditing this table against the source — the row said "ChatScreen, ReferralsScreen" and only one had it. Chat copy now uses `navigator.clipboard` with an `execCommand` fallback for non-secure origins. |
 | `@react-native-community/datetimepicker` | AvailabilityScreen | **Port** → native `<input type="date">`. |
 | `react-native-razorpay` | SubscriptionScreen | **Port** → Razorpay hosted Checkout.js. |
 | `@react-native-firebase/messaging` (FCM) | AuthContext | **DEFERRED** — see below. |
@@ -219,7 +224,7 @@ Per brief §1.5, nothing here is silently dropped.
 | `AsyncStorage` session persistence | AuthContext | **Adapt** → Firebase Auth web persistence + httpOnly session cookie set via Route Handler. |
 | Image picker | *none exists* | **N/A** — see §0.3. HTML file input. |
 | `react-native-vector-icons` (Feather) | most screens | **Port** → `lucide-react` (Feather-derived, same icon names). |
-| `react-native-linear-gradient` | ChatScreen, dashboards | **Port** → CSS `linear-gradient`. |
+| `react-native-linear-gradient` | 25 files, incl. `OrbBackground` in `components/ui.tsx` | **Ported.** This row previously said "ChatScreen, dashboards" and was marked ported when nothing had been done — the web had zero gradients. `BackgroundWash` reproduces mobile's two corner orbs with `radial-gradient` (a literal `linear-gradient` gives a hard-edged band), rendered once in the app shell rather than repeated in 25 files. |
 
 ### Web push decision: **DEFERRED — confirmed at Phase 7**
 
