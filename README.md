@@ -17,6 +17,13 @@ Migration progress and decisions live in
 [WEB_MIGRATION_PLAN.md](./WEB_MIGRATION_PLAN.md) — that file is the source of
 truth for what is done, what is left, and why things were decided.
 
+### 👉 Setting this up? Start here
+
+**[Connecting real services — what this needs from you](#connecting-real-services--what-this-needs-from-you)**
+is the complete list of credentials, code and decisions required to run this for
+real, split by which of those three it actually is. Nothing on that list is
+guessed — every file path and variable name is checked against the source.
+
 ---
 
 ## Stack
@@ -192,40 +199,118 @@ silently breaks payments.
 
 ---
 
-## Connecting real services
+## Connecting real services — what this needs from you
 
-**The app runs with no third-party accounts.** Auth and payments both ship with
-working local implementations, so the whole product can be built and used before
-Firebase or Razorpay exist. Neither is a stub — the mock providers sign and
-verify real credentials and real webhook signatures, so the code paths you rely
-on in production are the ones exercised in development.
+**The app runs today with no third-party accounts.** Every screen works against
+local implementations, so the product can be built and demonstrated before any
+vendor exists.
 
-Both mock providers **refuse to start when `NODE_ENV=production`**, so a
-half-configured deploy fails loudly instead of authenticating strangers or
-granting paid plans for free.
+What follows is the complete list of what has to come from you. It is split by
+the kind of work involved, because that distinction is the whole point: some of
+these are a paste-in, some need code written, and some are decisions nobody but
+you can make.
 
-### Connecting Firebase Auth
+> Full narrative version, including the reasoning behind each deferral, is in
+> [HANDOVER.md](HANDOVER.md).
 
-1. Register a **Web app** in the Firebase project (additive; changes nothing for
-   the mobile app).
-2. Fill `NEXT_PUBLIC_FIREBASE_*` and the three `FIREBASE_*` service-account vars.
-3. Set `AUTH_PROVIDER=firebase` and `NEXT_PUBLIC_AUTH_PROVIDER=firebase`.
-4. Add your domain under Firebase Auth → Settings → Authorized domains.
+### Where the values go
 
-No application code changes. Everything speaks `AuthServerProvider` /
-`AuthClientProvider`; only `src/lib/providers/auth/` knows Firebase exists.
+One file, `.env.local` in the repo root. It is gitignored — never commit it.
 
-### Connecting Razorpay
+```bash
+cp .env.example .env.local     # then fill it in
+```
 
-1. Fill `NEXT_PUBLIC_RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
-   `RAZORPAY_WEBHOOK_SECRET`.
-2. Set `PAYMENT_PROVIDER=razorpay`.
-3. Register the webhook at `<NEXT_PUBLIC_APP_URL>/api/v1/payments/webhook` for
-   the `payment.captured` event.
+On a host (Vercel, Railway, Fly), the same names go in that platform's
+environment settings rather than a file.
 
-Order amounts are always re-derived server-side from our own price list, and a
-paid tier is granted **only** from a signature-verified webhook — never from the
-browser claiming success.
+---
+
+### Tier 1 — credentials only
+
+These are fully implemented. Paste the values and they work; there is no code
+to write.
+
+| Service | Variables to set | Implementation |
+|---|---|---|
+| **Firebase Auth** | `AUTH_PROVIDER=firebase`, `NEXT_PUBLIC_AUTH_PROVIDER=firebase`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, and the six `NEXT_PUBLIC_FIREBASE_*` client keys | `src/lib/providers/auth/firebase.server.ts` |
+| **Razorpay** | `PAYMENT_PROVIDER=razorpay`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | `src/lib/providers/payments/index.server.ts` |
+
+**Firebase setup:** register a *Web app* in the existing project — additive, and
+it changes nothing for the mobile app — then add your domain under
+Auth → Settings → Authorized domains.
+
+**Razorpay setup:** register the webhook at
+`<NEXT_PUBLIC_APP_URL>/api/v1/payments/webhook` for the `payment.captured`
+event. Order amounts are always re-derived server-side from our own price list,
+and a paid tier is granted **only** from a signature-verified webhook — never
+from the browser claiming success.
+
+> ⚠️ **Neither has ever been executed against a real service.** The contracts
+> are identical to the mocks and the mocks are exercised by tests, but "the
+> interface is satisfied" is not "Razorpay accepted the payload." Use test keys
+> and watch one real transaction end to end before pointing anything at live
+> money.
+
+---
+
+### Tier 2 — a vendor decision, then code
+
+These three are deliberate stubs that **throw** rather than fail quietly. Each
+sits beside a working mock that documents the exact contract, so implementing
+one is filling in methods, not designing an interface.
+
+| Service | File | What to implement |
+|---|---|---|
+| **File storage** | `src/lib/providers/storage/index.server.ts` → `FirebaseStorageProvider` | `createUploadTarget`, `getReadUrl`, `exists`, `delete`. Vars: `STORAGE_PROVIDER=firebase`, `FIREBASE_STORAGE_BUCKET` |
+| **SMS / OTP** | `src/lib/providers/otp/index.server.ts` → `SmsOtpProvider` | One `send()` against Twilio / MSG91 / similar. Vars: `OTP_PROVIDER=sms`, `SMS_API_KEY`, `SMS_SENDER_ID` |
+| **Email** | `src/lib/providers/email/index.server.ts` → `SmtpEmailProvider` | One `send()` against SES / Resend / Postmark. Vars: `EMAIL_PROVIDER=smtp`, `EMAIL_API_KEY`, `EMAIL_FROM` |
+
+**Non-negotiable for storage:** `getReadUrl` must return a short-lived **signed**
+URL for the `document` and `evidence` contexts. Those are KYC identity documents
+and dispute evidence, not public assets. The local implementation does this, and
+it is why uploads live in `.data/uploads` and **not** `public/uploads` —
+anything under `public/` is served unauthenticated by Next.js at the root path,
+which would put every identity document on a guessable URL.
+
+`STORAGE_PROVIDER` accepts only `local` and `firebase`. In production any other
+value resolves to `firebase` and fails loudly, rather than silently falling back
+to local disk.
+
+---
+
+### Tier 3 — decisions only you can make
+
+| Decision | Variable | Why it matters |
+|---|---|---|
+| **Database** | `DATABASE_URL` | The real blocker. SQLite does not survive serverless hosting — see [the SQLite problem](#before-you-deploy-the-sqlite-problem). Neon / Supabase / Railway Postgres, then change `provider` in `prisma/schema.prisma`. |
+| **Public URL** | `NEXT_PUBLIC_APP_URL` | Backs the CSRF origin check. A wrong value breaks every mutation. |
+| **Storage signing key** | `STORAGE_SIGNING_SECRET` | `openssl rand -base64 32`. Easy to miss. Left unset, every instance signs with its own random key, so a signed KYC link minted by one is rejected by the next — and all outstanding links die on each deploy. |
+| **Proxy depth** | `TRUSTED_PROXY_COUNT` | `1` behind Vercel. A wrong value makes rate limiting spoofable. |
+| **GDPR erasure schedule** | *(no variable)* | Deletion requests accumulate with a grace period. The erasure function is written and tested; nothing runs it. That needs a cron, which is infrastructure. |
+
+---
+
+### Suggested order
+
+1. **Postgres, `NEXT_PUBLIC_APP_URL`, `STORAGE_SIGNING_SECRET`** — unblocks a
+   real deployment at all.
+2. **Firebase** — one project covers auth *and* storage, and the same
+   registration unblocks web push later.
+3. **Razorpay test keys** — the highest-risk untested path, because it is money.
+4. **SMS and email** — least urgent. Both degrade visibly rather than
+   dangerously: OTP codes are logged, email is logged.
+
+### Verify before you deploy
+
+```bash
+NODE_ENV=production DATABASE_URL="<real>" pnpm preflight
+```
+
+Exits non-zero on anything that would otherwise fail silently — a development
+provider in production, SQLite, a missing signing secret, and a **misspelled**
+`STORAGE_PROVIDER`, which used to pass this check and then quietly write
+identity documents to an ephemeral disk.
 
 ---
 
