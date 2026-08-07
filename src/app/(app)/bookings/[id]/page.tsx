@@ -111,7 +111,7 @@ export default async function BookingDetailPage({
           </Card>
 
           {booking.status === "disputed" ? (
-            <Card className="border-[var(--destructive)] p-5">
+            <Card className="ring-2 ring-[var(--destructive)] p-5">
               <h2 className="font-medium text-[var(--destructive)]">
                 This booking is under dispute
               </h2>

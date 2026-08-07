@@ -395,8 +395,15 @@ export function ChatThread({
                 ) : null}
 
                 <div
+                  /*
+                   * Both sides stay filled rather than going soft. A bubble is
+                   * the one surface here that must be attributable at a glance,
+                   * and two same-colour extrusions differing only in shadow
+                   * direction is not a reliable way to tell who said what.
+                   * The extrusion is additive; the fill still does the work.
+                   */
                   className={cn(
-                    "max-w-[75%] rounded-2xl px-4 py-2.5 text-sm",
+                    "max-w-[75%] rounded-2xl nm-raised-sm px-4 py-2.5 text-sm",
                     mine
                       ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                       : "bg-[var(--muted)] text-[var(--foreground)]",

@@ -75,7 +75,7 @@ export default async function RequirementsPage() {
         <ul className="space-y-3">
           {page.items.map((req) => (
             <li key={req.id}>
-              <Card className="transition hover:border-[var(--primary)]">
+              <Card className="transition hover:ring-2 hover:ring-[var(--primary)]">
                 <Link href={`/requirements/${req.id}`} className="block p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <h2 className="min-w-0 flex-1 font-medium">{req.title}</h2>

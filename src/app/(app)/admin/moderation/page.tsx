@@ -60,7 +60,7 @@ export default async function AdminModerationPage() {
                   </div>
 
                   {report.details ? (
-                    <p className="mt-3 whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-3 text-sm">
+                    <p className="mt-3 whitespace-pre-wrap rounded-xl nm-inset p-3 text-sm">
                       {report.details}
                     </p>
                   ) : null}
@@ -90,7 +90,7 @@ export default async function AdminModerationPage() {
             <ul className="divide-y divide-[var(--border)]">
               {flagged.items.map((message) => (
                 <li key={message.id} className="p-5">
-                  <p className="whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-3 text-sm">
+                  <p className="whitespace-pre-wrap rounded-xl nm-inset p-3 text-sm">
                     {message.text}
                   </p>
                   <p className="mt-2 text-xs text-[var(--muted-foreground)]">

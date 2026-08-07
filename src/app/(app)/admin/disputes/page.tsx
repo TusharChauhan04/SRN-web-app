@@ -56,8 +56,8 @@ export default async function AdminDisputesPage({
               href={`/admin/disputes?status=${tab.key}`}
               className={`rounded-full px-3 py-1.5 text-sm transition ${
                 active
-                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                  : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--border)]"
+                  ? "nm-raised-sm bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : "nm-inset text-[var(--muted-foreground)]"
               }`}
             >
               {tab.label}
@@ -102,7 +102,7 @@ export default async function AdminDisputesPage({
                   </div>
                 </div>
 
-                <p className="mt-4 whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-4 text-sm leading-relaxed">
+                <p className="mt-4 whitespace-pre-wrap rounded-xl nm-inset p-4 text-sm leading-relaxed">
                   {dispute.details}
                 </p>
 

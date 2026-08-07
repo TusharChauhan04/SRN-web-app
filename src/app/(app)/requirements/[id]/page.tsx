@@ -173,7 +173,7 @@ export default async function RequirementDetailPage({
                       </div>
 
                       {quote.message ? (
-                        <p className="mt-3 whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-3 text-sm">
+                        <p className="mt-3 whitespace-pre-wrap rounded-xl nm-inset p-3 text-sm">
                           {quote.message}
                         </p>
                       ) : null}
@@ -267,7 +267,7 @@ export default async function RequirementDetailPage({
                   {formatRelative(myQuote.createdAt)}
                 </p>
                 {myQuote.message ? (
-                  <p className="mt-3 whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-3 text-sm">
+                  <p className="mt-3 whitespace-pre-wrap rounded-xl nm-inset p-3 text-sm">
                     {myQuote.message}
                   </p>
                 ) : null}

@@ -177,7 +177,7 @@ export function PlanPicker({
           <li key={plan.tier}>
             <Card
               className={`flex h-full flex-col p-6 ${
-                plan.isCurrent ? "border-[var(--primary)]" : ""
+                plan.isCurrent ? "ring-2 ring-[var(--primary)]" : ""
               }`}
             >
               <div className="flex items-center justify-between gap-2">

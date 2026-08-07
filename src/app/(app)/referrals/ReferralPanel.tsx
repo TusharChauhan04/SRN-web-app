@@ -51,7 +51,7 @@ export function ReferralPanel({
       />
       <div className="space-y-5 p-5">
         <div className="flex items-center gap-3">
-          <code className="flex-1 rounded-xl bg-[var(--muted)] px-4 py-3 text-center font-mono text-lg font-semibold tracking-widest">
+          <code className="flex-1 rounded-xl nm-inset px-4 py-3 text-center font-mono text-lg font-semibold tracking-widest">
             {code}
           </code>
           <Button type="button" variant="outline" onClick={() => void copy()}>

@@ -60,7 +60,7 @@ export function LoginForm() {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--primary)] text-2xl font-bold text-[var(--primary-foreground)]">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl nm-raised-sm bg-[var(--primary)] text-2xl font-bold text-[var(--primary-foreground)]">
           S
         </div>
         <h1 className="mt-4 text-2xl font-semibold tracking-tight">

@@ -98,7 +98,7 @@ export default async function QuoteDetailPage({
             </div>
 
             {quote.message ? (
-              <p className="mt-5 whitespace-pre-wrap rounded-xl bg-[var(--muted)] p-4 text-sm leading-relaxed">
+              <p className="mt-5 whitespace-pre-wrap rounded-xl nm-inset p-4 text-sm leading-relaxed">
                 {quote.message}
               </p>
             ) : null}

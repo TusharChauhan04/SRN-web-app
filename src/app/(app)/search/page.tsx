@@ -148,7 +148,7 @@ export default async function SearchPage({
         <ul className="grid gap-4 sm:grid-cols-2">
           {page.items.map((provider) => (
             <li key={provider.id}>
-              <Card className="h-full transition hover:border-[var(--primary)]">
+              <Card className="h-full transition hover:ring-2 hover:ring-[var(--primary)]">
                 <Link
                   href={`/providers/${provider.id}`}
                   className="flex h-full flex-col p-5"
