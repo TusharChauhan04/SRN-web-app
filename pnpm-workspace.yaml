@@ -1,0 +1,29 @@
+# Dependencies whose install/build scripts are allowed to run.
+# pnpm 10+ blocks postinstall scripts by default. Each of these needs one:
+#   prisma / @prisma/client / @prisma/engines — generate the client and fetch
+#     the query engine binary. Without them the app throws at import time
+#     ("@prisma/client did not initialize yet") on every server-rendered page.
+#   sharp        — Next.js image optimisation native binary
+#   esbuild      — native binary used by the test/build toolchain
+#   @firebase/util, protobufjs, unrs-resolver — transitive native/codegen steps
+# Single-package repo, but pnpm 10+ keeps these settings here rather than in
+# package.json. `packages` is required by pnpm 9 and harmless on 10+.
+packages:
+  - '.'
+
+# Security overrides. These lived in package.json's "pnpm" field until pnpm 10
+# stopped reading it — which silently DROPPED them, so the pinned-forward
+# versions were no longer being applied. Keep them here.
+overrides:
+  postcss@<8.5.18: '>=8.5.18'
+  sharp@<0.35.0: '>=0.35.0'
+
+allowBuilds:
+  '@firebase/util': true
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true

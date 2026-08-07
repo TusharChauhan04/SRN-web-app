@@ -31,9 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` — it is read from package.json "packageManager", so CI,
+      # Vercel and local development cannot drift apart again.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:

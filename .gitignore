@@ -46,6 +46,10 @@ prisma/*.db
 prisma/*.db-journal
 prisma/dev.db*
 
+# local tooling scratch databases at the repo root — not project source
+/shadow.db
+/shadow_idx.db
+
 # local file uploads (StorageProvider "local" development mode)
 # NOT under public/ — see LOCAL_ROOT in src/lib/providers/storage/index.server.ts
 /.data
