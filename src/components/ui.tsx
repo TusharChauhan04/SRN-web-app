@@ -261,7 +261,7 @@ export function Field({
       </label>
       {children}
       {error ? (
-        <p className="text-sm text-[var(--destructive)]" role="alert">
+        <p className="text-sm text-[var(--destructive-text)]" role="alert">
           {error}
         </p>
       ) : hint ? (
@@ -275,13 +275,21 @@ export function Field({
  * Fields are INSET rather than raised — the shadow runs the other way, which is
  * the cue that this is something you type into rather than press.
  *
- * `outline-none` only cancels the browser default; the global `:focus-visible`
- * rule in globals.css still paints a 2px primary outline, and that is the only
- * focus indicator here now that the border is gone. Do not remove it without
- * replacing it.
+ * There is deliberately NO `outline-none` here, and it must not come back.
+ *
+ * It was here, with a comment claiming the global `:focus-visible` rule would
+ * still paint over it. That is false. Tailwind declares
+ * `@layer theme, base, components, utilities`, `.outline-none` lands in
+ * `utilities` and the `:focus-visible` rule lives in `base`, and a later layer
+ * wins over an earlier one no matter the specificity. So `outline-style: none`
+ * silently beat the focus ring on every Input, Textarea and Select in the app —
+ * a keyboard user had no visible focus at all (WCAG 2.4.7). Adding
+ * `focus-visible:outline-2` alongside would NOT have fixed it either, because
+ * that reads --tw-outline-style, which outline-none has already pinned to none.
+ * Deleting it is the fix.
  */
 const CONTROL_BASE =
-  "w-full rounded-xl nm-inset px-3 py-2 text-sm outline-none transition placeholder:text-[var(--muted-foreground)] disabled:opacity-50";
+  "w-full rounded-xl nm-inset px-3 py-2 text-sm transition placeholder:text-[var(--muted-foreground)] disabled:opacity-50";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(CONTROL_BASE, "h-10", className)} {...props} />;

@@ -80,7 +80,7 @@ export default async function RequirementDetailPage({
       {actionError ? (
         <p
           role="alert"
-          className="mb-4 rounded-lg border border-[var(--destructive)] bg-[var(--destructive)]/10 px-4 py-3 text-sm text-[var(--destructive)]"
+          className="mb-4 rounded-lg border border-[var(--destructive)] bg-[var(--destructive)]/10 px-4 py-3 text-sm text-[var(--destructive-text)]"
         >
           {actionError}
         </p>

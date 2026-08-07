@@ -132,6 +132,53 @@ equivalent, not a downgrade.
 
 ## 2. Design tokens to port
 
+> ### ⚠️ SUPERSEDED — web and mobile are now different designs
+>
+> **This section is history.** The token port below describes what web looked
+> like up to the Neumorphic redesign; it is kept because the reasoning for the
+> original 1:1 port is still worth reading, not because it is current.
+>
+> **Do not re-sync `globals.css` with mobile's `colors.ts`.** The two apps are
+> deliberately allowed to diverge from this point, decided 8 Aug 2026. Mobile
+> keeps its palette; web owns its own. `src/app/globals.css` is the source of
+> truth for web, and the "keep the two in sync" note that used to sit at the top
+> of it has been removed.
+>
+> What changed, and why each one is load-bearing:
+>
+> - **`--background` and `--card` are now the SAME colour** (`#e0e5ec`). That is
+>   what makes a surface neumorphic — it is raised by shadow, not by contrast.
+>   Changing either alone flattens every surface in the app.
+> - **The page is a mid-tone, not near-white**, because a white highlight needs
+>   somewhere lighter to go.
+> - **`--muted-foreground` darkened to `#556070`.** On the old page `#64748b`
+>   measured 4.55:1 — only just over the AA floor — and the darker page drops it
+>   to 3.76:1. It carries every card description, field hint, stat label and
+>   placeholder.
+> - **`--destructive-text` and `--accent-text` are new.** The originals are fill
+>   colours, legible with white on top; as text on the page they measure 2.97:1
+>   and 1.97:1. The former paints every inline validation error.
+> - **`--border` darkened to `#a9b6c8`.** Cards gave up their borders in the same
+>   change, so these hairlines became the only separator left in long lists.
+> - **The dark palette is gone.** Nothing ever set the `dark` class, there was no
+>   toggle and no `prefers-color-scheme` query, so it never rendered. Restoring
+>   it is real work, not a palette swap: neumorphism needs a mid-tone base to
+>   cast a highlight onto, so `#0f172a` cannot be reused.
+>
+> **Two rules the style must never swallow**, both because a soft same-colour
+> edge is about 1.2:1 where WCAG 2.1 SC 1.4.11 wants 3:1:
+>
+> 1. Primary/destructive buttons and status badges keep a real fill.
+> 2. The focus ring stays. `outline-none` must not return to `CONTROL_BASE` —
+>    Tailwind's `utilities` layer beats `base`, so it silently defeated the
+>    global `:focus-visible` rule and left every input in the app with no
+>    keyboard focus indicator at all.
+>
+> **Use `outline-*`, never `ring-*`, to outline a neumorphic surface.** Both
+> `ring-*` and the `nm-*` utilities write `box-shadow`, so one always erases the
+> other — `hover:ring-2` wins on specificity and flattens the card at the exact
+> moment it should lift.
+
 From `src/constants/colors.ts` — both themes, verbatim, into CSS variables.
 
 | Token | Light | Dark |

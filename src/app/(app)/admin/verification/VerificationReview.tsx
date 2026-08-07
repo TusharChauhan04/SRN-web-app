@@ -96,7 +96,7 @@ export function VerificationReview({ requestId }: { requestId: string }) {
         )}
 
         {docError ? (
-          <p role="alert" className="mt-2 text-sm text-[var(--destructive)]">
+          <p role="alert" className="mt-2 text-sm text-[var(--destructive-text)]">
             {docError}
           </p>
         ) : null}

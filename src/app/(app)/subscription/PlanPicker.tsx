@@ -177,7 +177,7 @@ export function PlanPicker({
           <li key={plan.tier}>
             <Card
               className={`flex h-full flex-col p-6 ${
-                plan.isCurrent ? "ring-2 ring-[var(--primary)]" : ""
+                plan.isCurrent ? "outline-2 outline-[var(--primary)]" : ""
               }`}
             >
               <div className="flex items-center justify-between gap-2">
@@ -200,7 +200,7 @@ export function PlanPicker({
               <ul className="mt-5 space-y-2 text-sm">
                 {plan.features.map((feature) => (
                   <li key={feature} className="flex gap-2">
-                    <span aria-hidden className="text-[var(--accent)]">
+                    <span aria-hidden className="text-[var(--accent-text)]">
                       ✓
                     </span>
                     <span>{feature}</span>

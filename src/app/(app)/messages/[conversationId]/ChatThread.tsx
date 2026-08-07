@@ -79,7 +79,7 @@ function MessageActions({
           disabled={busy}
           title="Delete message"
           aria-label="Delete message"
-          className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--destructive)]/10 hover:text-[var(--destructive)] disabled:opacity-40"
+          className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--destructive)]/10 hover:text-[var(--destructive-text)] disabled:opacity-40"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -443,7 +443,7 @@ export function ChatThread({
       </div>
 
       {error ? (
-        <p role="alert" className="pb-2 text-sm text-[var(--destructive)]">
+        <p role="alert" className="pb-2 text-sm text-[var(--destructive-text)]">
           {error}
         </p>
       ) : null}

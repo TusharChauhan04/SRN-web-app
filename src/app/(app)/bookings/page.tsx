@@ -64,7 +64,7 @@ export default async function BookingsPage() {
             const other = isProvider ? booking.customer : booking.provider;
             return (
               <li key={booking.id}>
-                <Card className="transition hover:ring-2 hover:ring-[var(--primary)]">
+                <Card className="transition hover:outline-2 hover:outline-[var(--primary)]">
                   <Link
                     href={`/bookings/${booking.id}`}
                     className="flex flex-wrap items-center gap-4 p-5"

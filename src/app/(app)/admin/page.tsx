@@ -23,8 +23,8 @@ export default async function AdminOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Link href="/admin/disputes" className="block">
           <Card
-            className={`p-5 transition hover:ring-2 hover:ring-[var(--primary)] ${
-              data.openDisputes > 0 ? "ring-2 ring-[var(--destructive)]" : ""
+            className={`p-5 transition hover:outline-2 hover:outline-[var(--primary)] ${
+              data.openDisputes > 0 ? "outline-2 outline-[var(--destructive)]" : ""
             }`}
           >
             <p className="text-sm text-[var(--muted-foreground)]">
@@ -41,8 +41,8 @@ export default async function AdminOverviewPage() {
 
         <Link href="/admin/verification" className="block">
           <Card
-            className={`p-5 transition hover:ring-2 hover:ring-[var(--primary)] ${
-              data.pendingVerifications > 0 ? "ring-2 ring-[var(--accent)]" : ""
+            className={`p-5 transition hover:outline-2 hover:outline-[var(--primary)] ${
+              data.pendingVerifications > 0 ? "outline-2 outline-[var(--accent)]" : ""
             }`}
           >
             <p className="text-sm text-[var(--muted-foreground)]">

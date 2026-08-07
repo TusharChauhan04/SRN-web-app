@@ -57,7 +57,7 @@ export default async function AdminDisputesPage({
               className={`rounded-full px-3 py-1.5 text-sm transition ${
                 active
                   ? "nm-raised-sm bg-[var(--primary)] text-[var(--primary-foreground)]"
-                  : "nm-inset text-[var(--muted-foreground)]"
+                  : "text-[var(--muted-foreground)] hover:nm-raised-sm"
               }`}
             >
               {tab.label}

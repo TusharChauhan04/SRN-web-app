@@ -149,7 +149,7 @@ export function ImageUploadField({
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm text-[var(--destructive)]">
+        <p role="alert" className="text-sm text-[var(--destructive-text)]">
           {error}
         </p>
       ) : hint ? (

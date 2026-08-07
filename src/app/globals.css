@@ -84,10 +84,26 @@
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
 
-  /* Hairlines. Neumorphic surfaces carry no border; these are kept for the
-     places where a boundary still has to be unambiguous. */
-  --border: #c8d0dc;
-  --input: #c8d0dc;
+  /*
+   * Text-on-page variants of the two accent hues.
+   *
+   * --destructive and --accent are FILL colours: they are legible with white on
+   * top, which is how buttons and badges use them. As text directly on the page
+   * they are not — #ef4444 measures 2.97:1 and #14b8a6 measures 1.97:1 against
+   * this background, both under the 4.5:1 AA floor. --destructive in particular
+   * paints every inline validation error in the app, so the failure is on the
+   * text a user is least able to skip.
+   *
+   * Use these for glyphs and copy; keep the originals for fills and outlines.
+   */
+  --destructive-text: #b91c1c; /* 5.11:1 */
+  --accent-text: #0f766e; /* 4.32:1 */
+
+  /* Hairlines. Neumorphic surfaces carry no border, so these are the only
+     separator left in long lists — darkened from #c8d0dc (1.23:1), which was
+     nearly invisible once Card gave up its border in the same change. */
+  --border: #a9b6c8;
+  --input: #a9b6c8;
 
   /* The two shadow colours the whole extrusion effect is built from. */
   --nm-light: #ffffff;
@@ -127,8 +143,19 @@
   }
 
   /* Visible focus for keyboard users on every interactive element. */
+  /*
+   * Longhands, not the `outline` shorthand.
+   *
+   * `outline: 2px solid var(--primary)` applied its width and offset but
+   * dropped the colour, falling back to currentColor — so the ring rendered in
+   * the body text colour instead of the brand. Setting outline-color on its own
+   * resolves the variable reliably. (The navy fallback was still a perfectly
+   * visible ring, which is exactly why this was easy to miss.)
+   */
   :focus-visible {
-    outline: 2px solid var(--primary);
+    outline-width: 2px;
+    outline-style: solid;
+    outline-color: var(--primary);
     outline-offset: 2px;
   }
 }
@@ -148,10 +175,29 @@
  * `@utility` is what registers these with the variant system.
  */
 
+/*
+ * EVERY rule below leads with `var(--tw-ring-shadow, 0 0 #0000)` so that a ring
+ * applied to the same element survives instead of being erased.
+ *
+ * USE `outline-*`, NOT `ring-*`, TO OUTLINE ONE OF THESE SURFACES.
+ *
+ * `box-shadow` is a single property and `ring-*` composes into it, so the two
+ * can only ever coexist by agreement. The slot below buys that for a ring at
+ * equal specificity, but it CANNOT save a variant: `hover:ring-2` is (0,2,0)
+ * against `nm-raised`'s (0,1,0), so it wins outright and replaces the whole
+ * box-shadow — the card loses its extrusion and visibly flattens at the moment
+ * it is meant to lift. `outline` is a separate property, so it layers over the
+ * extrusion instead of competing for it, and it costs no layout.
+ *
+ * Both halves of this were measured with getComputedStyle in a real browser,
+ * after the source reading said otherwise.
+ */
+
 /* Panels, cards, sidebars, stat tiles. */
 @utility nm-raised {
   background: var(--card);
   box-shadow:
+    var(--tw-ring-shadow, 0 0 #0000),
     6px 6px 12px var(--nm-dark),
     -6px -6px 12px var(--nm-light);
 }
@@ -160,6 +206,7 @@
    still reads as a separate object rather than a second panel. */
 @utility nm-raised-sm {
   box-shadow:
+    var(--tw-ring-shadow, 0 0 #0000),
     4px 4px 8px var(--nm-dark),
     -4px -4px 8px var(--nm-light);
 }
@@ -169,6 +216,7 @@
 @utility nm-inset {
   background: var(--card);
   box-shadow:
+    var(--tw-ring-shadow, 0 0 #0000),
     inset 4px 4px 8px var(--nm-dark),
     inset -4px -4px 8px var(--nm-light);
 }
@@ -176,6 +224,7 @@
 /* Momentary pressed state, and the selected nav item. */
 @utility nm-pressed {
   box-shadow:
+    var(--tw-ring-shadow, 0 0 #0000),
     inset 3px 3px 6px var(--nm-dark),
     inset -3px -3px 6px var(--nm-light);
 }
@@ -188,7 +237,9 @@
  * extrusion is the honest signal; opacity alone is not.
  */
 @utility nm-flat {
-  box-shadow: none;
+  /* Drops the extrusion but NOT a ring — a disabled control must still be able
+     to show a focus indicator. */
+  box-shadow: var(--tw-ring-shadow, 0 0 #0000);
 }
 
 @layer utilities {
