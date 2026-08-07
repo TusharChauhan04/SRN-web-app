@@ -47,11 +47,21 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
                     href={item.href}
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
+                    /*
+                     * The current item is pressed INTO the surface — the
+                     * neumorphic idiom for selection — but depth is not left to
+                     * carry it alone. A soft inset is a weak signal on its own
+                     * and disappears entirely for anyone who cannot resolve low
+                     * contrast, so colour and weight change with it, and
+                     * aria-current above states it outright. Three channels, not
+                     * one. --primary measures 4.50:1 on this page, so the text
+                     * colour is legible by itself.
+                     */
                     className={cn(
                       "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition",
                       active
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] font-medium"
-                        : "text-[var(--foreground)] hover:bg-[var(--muted)]",
+                        ? "nm-pressed font-medium text-[var(--primary)]"
+                        : "text-[var(--foreground)] hover:nm-raised-sm",
                     )}
                   >
                     <Icon name={item.icon} className="h-4 w-4 shrink-0" />
@@ -71,7 +81,9 @@ function SidebarFooter({ user }: { user: User }) {
   const { signOut, busy } = useAuth();
 
   return (
-    <div className="border-t border-[var(--border)] p-3">
+    // Hairline dropped: on a same-colour surface the extrusion is the edge, and
+    // a hard 1px rule reads as a seam through it. Spacing separates instead.
+    <div className="p-3">
       <div className="flex items-center gap-3 rounded-xl px-2 py-2">
         <Avatar name={user.name} src={user.avatarUrl} size={36} />
         <div className="min-w-0 flex-1">
@@ -108,7 +120,7 @@ export function Sidebar({ user }: { user: User }) {
   return (
     <>
       {/* Mobile top bar */}
-      <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 lg:hidden">
+      <header className="flex items-center gap-3 nm-raised px-4 py-3 lg:hidden">
         <Button
           variant="ghost"
           size="sm"
@@ -132,14 +144,17 @@ export function Sidebar({ user }: { user: User }) {
 
       <aside
         className={cn(
-          "z-50 flex w-64 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--card)]",
+          // `nm-raised` replaces the right-hand hairline: the panel casts its
+          // own edge. The up-left highlight falls off-screen, which is correct
+          // for a panel flush to the viewport edge.
+          "z-50 flex w-64 shrink-0 flex-col nm-raised",
           "fixed inset-y-0 left-0 transition-transform lg:static lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-5 py-4">
+        <div className="flex items-center justify-between gap-2 px-5 py-4">
           <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)]">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg nm-raised-sm bg-[var(--primary)] text-[var(--primary-foreground)]">
               S
             </span>
             SRN

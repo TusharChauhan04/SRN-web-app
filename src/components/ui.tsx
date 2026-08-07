@@ -191,16 +191,24 @@ export function BackgroundWash({
       aria-hidden
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
     >
+      {/*
+        Lifted from mobile's 6%/3% to 10%/5%. Those alphas were picked against a
+        near-white page; the neumorphic base is a mid-tone, so the same tint has
+        far less room to read against it and the per-role wash — the entire
+        point of this component — had all but vanished. Raised to the level
+        where the role is still legible at a glance without competing with the
+        shadows that do the structural work.
+      */}
       <div
         className="absolute -top-[100px] -right-[70px] h-[280px] w-[280px] rounded-full"
         style={{
-          background: `radial-gradient(circle, color-mix(in srgb, ${color} 6%, transparent) 0%, transparent 70%)`,
+          background: `radial-gradient(circle, color-mix(in srgb, ${color} 10%, transparent) 0%, transparent 70%)`,
         }}
       />
       <div
         className="absolute -bottom-[80px] -left-[70px] h-[280px] w-[280px] rounded-full"
         style={{
-          background: `radial-gradient(circle, color-mix(in srgb, ${color2} 3%, transparent) 0%, transparent 70%)`,
+          background: `radial-gradient(circle, color-mix(in srgb, ${color2} 5%, transparent) 0%, transparent 70%)`,
         }}
       />
     </div>
