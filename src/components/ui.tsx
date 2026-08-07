@@ -36,16 +36,27 @@ export function cn(...parts: (string | false | null | undefined)[]): string {
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger";
 type ButtonSize = "sm" | "md" | "lg";
 
+/*
+ * Primary, secondary and danger keep a SOLID fill on purpose.
+ *
+ * The rest of this design is neumorphic: same colour as the page, raised only
+ * by shadow. That gives a control roughly 1.2:1 against its background, and
+ * WCAG 2.1 SC 1.4.11 wants 3:1 for a UI boundary — so a purely extruded button
+ * is one a low-vision user cannot find. Keeping a filled ground on the actions
+ * that commit something (pay, submit, delete) is what stops the style from
+ * eating the affordance. `outline` and `ghost` may go soft because they are
+ * always secondary to one of these.
+ */
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90",
+    "bg-[var(--primary)] text-[var(--primary-foreground)] nm-raised-sm hover:opacity-90",
   secondary:
-    "bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90",
+    "bg-[var(--secondary)] text-[var(--secondary-foreground)] nm-raised-sm hover:opacity-90",
   outline:
-    "border border-[var(--border)] bg-transparent text-[var(--foreground)] hover:bg-[var(--muted)]",
-  ghost: "bg-transparent text-[var(--foreground)] hover:bg-[var(--muted)]",
+    "border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] nm-raised-sm",
+  ghost: "bg-transparent text-[var(--foreground)] hover:nm-raised-sm",
   danger:
-    "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:opacity-90",
+    "bg-[var(--destructive)] text-[var(--destructive-foreground)] nm-raised-sm hover:opacity-90",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -54,8 +65,14 @@ const BUTTON_SIZES: Record<ButtonSize, string> = {
   lg: "h-12 px-6 text-base",
 };
 
+/*
+ * `active:nm-pressed` is the extrusion inverting under the cursor — the press
+ * feedback the fill alone no longer gives. `disabled:nm-flat` drops the shadow
+ * entirely, because a dimmed button that still stands proud still reads as
+ * pressable; going flat is what actually says "inert".
+ */
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition active:nm-pressed disabled:nm-flat disabled:pointer-events-none disabled:opacity-50";
 
 export function Button({
   variant = "primary",
@@ -110,7 +127,9 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)]",
+        // No border: the extrusion IS the edge. `nm-raised` supplies the
+        // background, which is deliberately the same colour as the page.
+        "rounded-2xl nm-raised text-[var(--card-foreground)]",
         className,
       )}
       {...props}
@@ -244,8 +263,17 @@ export function Field({
   );
 }
 
+/*
+ * Fields are INSET rather than raised — the shadow runs the other way, which is
+ * the cue that this is something you type into rather than press.
+ *
+ * `outline-none` only cancels the browser default; the global `:focus-visible`
+ * rule in globals.css still paints a 2px primary outline, and that is the only
+ * focus indicator here now that the border is gone. Do not remove it without
+ * replacing it.
+ */
 const CONTROL_BASE =
-  "w-full rounded-xl border border-[var(--input)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] disabled:opacity-50";
+  "w-full rounded-xl nm-inset px-3 py-2 text-sm outline-none transition placeholder:text-[var(--muted-foreground)] disabled:opacity-50";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(CONTROL_BASE, "h-10", className)} {...props} />;
@@ -263,12 +291,26 @@ export function Select({ className, ...props }: ComponentProps<"select">) {
 
 type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 
+/*
+ * Badges keep a real tinted fill and take NO extrusion.
+ *
+ * They are the only thing on screen carrying entity status — open, disputed,
+ * rejected — so they have to stay legible rather than blend into the surface
+ * they sit on. Two consequences, both measured rather than guessed:
+ *
+ *  - Text darkened one step (700 → 800) and the tint lifted 15% → 18%. On the
+ *    old near-white page the 700 weights sat at 4.30–5.11:1; against the
+ *    mid-tone page they fell to 3.62–4.28:1, i.e. under the 4.5:1 AA floor at
+ *    the 12px these render at. These values measure 5.04–5.31:1.
+ *  - No `nm-raised-sm`. A 4px/8px shadow on a 20px-tall pill reads as smudge,
+ *    not relief, and muddies the tint that does the actual work.
+ */
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: "bg-[var(--muted)] text-[var(--muted-foreground)]",
-  success: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  warning: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  danger: "bg-red-500/15 text-red-700 dark:text-red-400",
-  info: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
+  success: "bg-emerald-500/18 text-emerald-800",
+  warning: "bg-amber-500/18 text-amber-800",
+  danger: "bg-red-500/18 text-red-800",
+  info: "bg-sky-500/18 text-sky-800",
 };
 
 export function Badge({
@@ -358,7 +400,7 @@ export function Avatar({
         alt=""
         width={size}
         height={size}
-        className="shrink-0 rounded-full object-cover"
+        className="shrink-0 rounded-full nm-raised-sm object-cover"
         style={{ width: size, height: size }}
       />
     );
@@ -367,7 +409,7 @@ export function Avatar({
   return (
     <span
       aria-hidden
-      className="inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--primary)] font-medium text-[var(--primary-foreground)]"
+      className="inline-flex shrink-0 items-center justify-center rounded-full nm-raised-sm bg-[var(--primary)] font-medium text-[var(--primary-foreground)]"
       style={{ width: size, height: size, fontSize: size * 0.36 }}
     >
       {initials || "?"}
@@ -385,7 +427,9 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] px-6 py-14 text-center">
+    // A dashed border has no neumorphic equivalent; an inset well is the
+    // native way to say "this space is empty" in this system.
+    <div className="flex flex-col items-center justify-center rounded-2xl nm-inset px-6 py-14 text-center">
       <h3 className="text-base font-medium">{title}</h3>
       {description ? (
         <p className="mt-1 max-w-sm text-sm text-[var(--muted-foreground)]">
@@ -417,16 +461,20 @@ export function Alert({
   tone?: "danger" | "warning" | "info";
   children: ReactNode;
 }) {
+  // Measured on the new page colour: 4.55 / 5.28 / 5.51 : 1. The border is
+  // kept — an alert is exactly the thing that must not dissolve into the page.
   const tones = {
-    danger: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
-    warning:
-      "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-400",
-    info: "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-400",
+    danger: "border-red-500/40 bg-red-500/10 text-red-700",
+    warning: "border-amber-500/40 bg-amber-500/10 text-amber-800",
+    info: "border-sky-500/40 bg-sky-500/10 text-sky-800",
   };
   return (
     <div
       role="alert"
-      className={cn("rounded-xl border px-4 py-3 text-sm", tones[tone])}
+      className={cn(
+        "rounded-xl border nm-raised-sm px-4 py-3 text-sm",
+        tones[tone],
+      )}
     >
       {children}
     </div>

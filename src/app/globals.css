@@ -1,11 +1,28 @@
 @import "tailwindcss";
 
 /*
- * Design tokens ported from the mobile app's src/constants/colors.ts.
+ * Design tokens — Neumorphic ("soft extruded") surface system.
  *
- * That file was already a shadcn-shaped semantic token set with both a light
- * and a dark palette, so this is a direct 1:1 port — not a reinterpretation.
- * Keep the two in sync if either side changes.
+ * ⚠️ THESE NO LONGER TRACK THE MOBILE APP. Web and mobile are deliberately
+ * different designs as of this change; the previous 1:1 port of mobile's
+ * src/constants/colors.ts is gone and must NOT be re-synced. Recorded in
+ * WEB_MIGRATION_PLAN.md.
+ *
+ * How neumorphism works here, because it constrains what you may change:
+ * a raised element is the SAME colour as the page behind it, and reads as
+ * raised only from a light shadow up-left and a dark shadow down-right. That
+ * is why --card === --background. Changing either in isolation flattens every
+ * surface in the app.
+ *
+ * --background is a mid-tone (#e0e5ec) rather than near-white because the
+ * highlight needs somewhere lighter to go. That darker page cost contrast, so
+ * --muted-foreground was darkened to compensate — see the note on it below.
+ *
+ * WHAT NEUMORPHISM MUST NOT SWALLOW. Soft same-colour edges give roughly
+ * 1.2:1 against their background, well under the 3:1 WCAG 2.1 SC 1.4.11 needs
+ * for a UI boundary. So the things a user must not miss keep a real fill:
+ * primary and destructive buttons, status badges, and the focus ring. Those
+ * are load-bearing, not stylistic — see src/components/ui.tsx.
  */
 
 @theme inline {
@@ -40,22 +57,41 @@
 }
 
 :root {
-  --background: #f8fafc;
+  /* The page, and every raised surface on it. These two are intentionally
+     identical — see the header note. */
+  --background: #e0e5ec;
+  --card: #e0e5ec;
+
   --foreground: #0f172a;
-  --card: #ffffff;
   --card-foreground: #0f172a;
   --primary: #7c3aed;
   --primary-foreground: #ffffff;
   --secondary: #1e293b;
   --secondary-foreground: #ffffff;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
+
+  /* Recessed wells (inputs, dividers) sit slightly darker than the page. */
+  --muted: #d6dce6;
+
+  /* Darkened from #64748b. On the old near-white page that was 4.55:1 —
+     already only just over the 4.5:1 AA floor — and the mid-tone page drops it
+     to 3.76:1, which fails. This is 5.04:1. It carries every card description,
+     field hint, stat label and placeholder in the app, so it is not a colour
+     to nudge lighter for looks. */
+  --muted-foreground: #556070;
+
   --accent: #14b8a6;
   --accent-foreground: #ffffff;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
+
+  /* Hairlines. Neumorphic surfaces carry no border; these are kept for the
+     places where a boundary still has to be unambiguous. */
+  --border: #c8d0dc;
+  --input: #c8d0dc;
+
+  /* The two shadow colours the whole extrusion effect is built from. */
+  --nm-light: #ffffff;
+  --nm-dark: #a3b1c6;
 
   /* Role accents are theme-independent — same hues on mobile in both modes. */
   --role-business: #7c3aed;
@@ -69,27 +105,18 @@
 }
 
 /*
- * Dark mode is class-driven rather than media-driven so an explicit user choice
- * can win over the OS setting later. Mobile's dark palette, ported verbatim.
+ * There is deliberately no dark palette here.
+ *
+ * A `.dark` block used to sit at this spot, ported from mobile — but nothing
+ * ever put the `dark` class on the document, there was no toggle, and no
+ * prefers-color-scheme query, so it never rendered. It was removed rather than
+ * converted so that nobody maintains a theme the app cannot display.
+ *
+ * If dark mode is wanted later it is a real piece of work, not a palette swap:
+ * neumorphism needs a mid-tone base to cast a light highlight onto, so #0f172a
+ * is far too dark to reuse. Budget a second --nm-light/--nm-dark pair around a
+ * ~#2e3238 base, plus the toggle that never existed.
  */
-.dark {
-  --background: #0f172a;
-  --foreground: #f8fafc;
-  --card: #1e293b;
-  --card-foreground: #f8fafc;
-  --primary: #a78bfa;
-  --primary-foreground: #0f172a;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #0f172a;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --accent: #2dd4bf;
-  --accent-foreground: #0f172a;
-  --destructive: #f87171;
-  --destructive-foreground: #ffffff;
-  --border: #334155;
-  --input: #334155;
-}
 
 @layer base {
   body {
@@ -106,12 +133,74 @@
   }
 }
 
+/*
+ * The extrusion states. Every soft surface in the app is one of these, so a
+ * change here is a change everywhere — which is the point.
+ *
+ * The offset/blur pairs are proportional: blur is always 2× the offset. That
+ * ratio is what keeps a small control and a large panel looking like they are
+ * lit from the same place. Keep it if you add a size.
+ *
+ * Declared with `@utility`, NOT inside `@layer utilities`. In Tailwind 4 a
+ * plain class in that layer is ordinary CSS and cannot take a variant, so
+ * `active:nm-pressed` and `disabled:nm-flat` would silently emit nothing —
+ * the button would keep its raised shadow while pressed and while disabled.
+ * `@utility` is what registers these with the variant system.
+ */
+
+/* Panels, cards, sidebars, stat tiles. */
+@utility nm-raised {
+  background: var(--card);
+  box-shadow:
+    6px 6px 12px var(--nm-dark),
+    -6px -6px 12px var(--nm-light);
+}
+
+/* Controls: buttons, badges, avatars. Shallower, so a button sitting on a card
+   still reads as a separate object rather than a second panel. */
+@utility nm-raised-sm {
+  box-shadow:
+    4px 4px 8px var(--nm-dark),
+    -4px -4px 8px var(--nm-light);
+}
+
+/* Recessed wells: inputs, textareas, selects, search. Shadow direction is
+   inverted, which is the whole cue that a field can be typed into. */
+@utility nm-inset {
+  background: var(--card);
+  box-shadow:
+    inset 4px 4px 8px var(--nm-dark),
+    inset -4px -4px 8px var(--nm-light);
+}
+
+/* Momentary pressed state, and the selected nav item. */
+@utility nm-pressed {
+  box-shadow:
+    inset 3px 3px 6px var(--nm-dark),
+    inset -3px -3px 6px var(--nm-light);
+}
+
+/*
+ * Disabled controls go FLAT rather than dimmed-but-raised.
+ *
+ * Under this system "raised" is the affordance that says pressable, so a
+ * greyed-out button that still stands proud reads as available. Removing the
+ * extrusion is the honest signal; opacity alone is not.
+ */
+@utility nm-flat {
+  box-shadow: none;
+}
+
 @layer utilities {
-  /* Standard card surface — used by nearly every ported screen. */
+  /* Retained alias: nothing in src/ references `.surface` today, but class
+     names can be assembled at runtime, so this keeps any such caller working
+     instead of silently losing its background. */
   .surface {
     background: var(--card);
     color: var(--card-foreground);
-    border: 1px solid var(--border);
     border-radius: var(--radius);
+    box-shadow:
+      6px 6px 12px var(--nm-dark),
+      -6px -6px 12px var(--nm-light);
   }
 }
