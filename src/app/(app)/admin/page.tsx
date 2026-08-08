@@ -23,8 +23,19 @@ export default async function AdminOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Link href="/admin/disputes" className="block">
           <Card
-            className={`p-5 transition hover:outline-2 hover:outline-[var(--primary)] ${
-              data.openDisputes > 0 ? "outline-2 outline-[var(--destructive)]" : ""
+            /*
+              The whole outline treatment lives in ONE branch on purpose.
+              Splitting it — a base `outline-0` plus a conditional `outline-2` —
+              puts two width utilities on the same element, and the winner is
+              decided by their order in the generated stylesheet, not by the
+              order written here. Alerting state wins outright; otherwise the
+              card carries a transparent-width primary outline that hover
+              thickens.
+            */
+            className={`p-5 transition ${
+              data.openDisputes > 0
+                ? "outline-2 outline-[var(--destructive-text)]"
+                : "outline-0 outline-[var(--primary)] hover:outline-2"
             }`}
           >
             <p className="text-sm text-[var(--muted-foreground)]">
@@ -41,8 +52,10 @@ export default async function AdminOverviewPage() {
 
         <Link href="/admin/verification" className="block">
           <Card
-            className={`p-5 transition hover:outline-2 hover:outline-[var(--primary)] ${
-              data.pendingVerifications > 0 ? "outline-2 outline-[var(--accent)]" : ""
+            className={`p-5 transition ${
+              data.pendingVerifications > 0
+                ? "outline-2 outline-[var(--accent-text)]"
+                : "outline-0 outline-[var(--primary)] hover:outline-2"
             }`}
           >
             <p className="text-sm text-[var(--muted-foreground)]">

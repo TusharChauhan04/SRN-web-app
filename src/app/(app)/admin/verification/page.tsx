@@ -58,7 +58,7 @@ export default async function AdminVerificationPage({
             className={`rounded-full px-3 py-1.5 text-sm transition ${
               status === tab.key
                 ? "nm-raised-sm bg-[var(--primary)] text-[var(--primary-foreground)]"
-                : "text-[var(--muted-foreground)] hover:nm-raised-sm"
+                : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:nm-raised-sm"
             }`}
           >
             {tab.label}

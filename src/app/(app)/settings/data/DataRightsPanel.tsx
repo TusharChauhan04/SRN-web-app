@@ -79,7 +79,7 @@ export function DataRightsPanel({
         </div>
       </Card>
 
-      <Card className="outline-2 outline-[var(--destructive)]">
+      <Card className="outline-2 outline-[var(--destructive-text)]">
         <CardHeader
           title="Close your account"
           description="This removes your personal data and your sign-in."

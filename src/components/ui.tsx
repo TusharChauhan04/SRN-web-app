@@ -52,8 +52,12 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
     "bg-[var(--primary)] text-[var(--primary-foreground)] nm-raised-sm hover:opacity-90",
   secondary:
     "bg-[var(--secondary)] text-[var(--secondary-foreground)] nm-raised-sm hover:opacity-90",
+  // `hover:nm-pressed` rather than a fill change: the redesign dropped this
+  // variant's `hover:bg-[var(--muted)]` and replaced it with nothing, which
+  // left the more prominent of the two soft variants with LESS feedback than
+  // `ghost` below it.
   outline:
-    "border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] nm-raised-sm",
+    "border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] nm-raised-sm hover:nm-pressed",
   ghost: "bg-transparent text-[var(--foreground)] hover:nm-raised-sm",
   danger:
     "bg-[var(--destructive)] text-[var(--destructive-foreground)] nm-raised-sm hover:opacity-90",
@@ -314,12 +318,18 @@ type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
  * rejected — so they have to stay legible rather than blend into the surface
  * they sit on. Two consequences, both measured rather than guessed:
  *
- *  - Text darkened one step (700 → 800) and the tint lifted 15% → 18%. On the
- *    old near-white page the 700 weights sat at 4.30–5.11:1; against the
- *    mid-tone page they fell to 3.62–4.28:1, i.e. under the 4.5:1 AA floor at
- *    the 12px these render at. These values measure 5.04–5.31:1.
+ *  - Text darkened one step (700 → 800) and the tint lifted 15% → 18%. At the
+ *    700 weights on this page these measured 3.64–4.22:1, under the 4.5:1 AA
+ *    floor at the 12px they render at. As written they measure 5.06–5.29:1.
  *  - No `nm-raised-sm`. A 4px/8px shadow on a 20px-tall pill reads as smudge,
  *    not relief, and muddies the tint that does the actual work.
+ *
+ * ⚠️ IF YOU RE-CHECK THESE NUMBERS, USE TAILWIND 4's PALETTE, NOT v3's.
+ * v4 moved the colour scales to oklch and the sRGB values genuinely changed:
+ * red-700 is #bf000f here, not v3's #b91c1c; amber-800 is #953d00, not #92400e.
+ * Computing with the old hexes gives plausible-looking numbers that are wrong,
+ * which is exactly how the figures in this comment were wrong the first time.
+ * The compiled values are in the build output as `--color-<name>`.
  */
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: "bg-[var(--muted)] text-[var(--muted-foreground)]",
@@ -477,10 +487,12 @@ export function Alert({
   tone?: "danger" | "warning" | "info";
   children: ReactNode;
 }) {
-  // Measured on the new page colour: 4.55 / 5.28 / 5.51 : 1. The border is
+  // 5.78 / 5.30 / 5.49 : 1 on this page. `danger` is red-800, not red-700, for
+  // the same reason BADGE_TONES moved: at 700 it measured 4.51:1, which clears
+  // AA only just, and a rounding error either way puts it under. The border is
   // kept — an alert is exactly the thing that must not dissolve into the page.
   const tones = {
-    danger: "border-red-500/40 bg-red-500/10 text-red-700",
+    danger: "border-red-500/40 bg-red-500/10 text-red-800",
     warning: "border-amber-500/40 bg-amber-500/10 text-amber-800",
     info: "border-sky-500/40 bg-sky-500/10 text-sky-800",
   };

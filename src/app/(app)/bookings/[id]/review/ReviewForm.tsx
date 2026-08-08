@@ -33,7 +33,7 @@ export function ReviewForm({ bookingId }: { bookingId: string }) {
                 aria-label={`${value} star${value === 1 ? "" : "s"}`}
                 className="rounded-lg p-1 text-3xl leading-none transition hover:scale-110"
               >
-                <span className={value <= rating ? "text-amber-700" : "text-[var(--border)]"}>
+                <span className={value <= rating ? "text-amber-800" : "text-[var(--border)]"}>
                   ★
                 </span>
               </button>

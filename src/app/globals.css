@@ -94,10 +94,14 @@
    * paints every inline validation error in the app, so the failure is on the
    * text a user is least able to skip.
    *
-   * Use these for glyphs and copy; keep the originals for fills and outlines.
+   * Use these for glyphs, copy AND outlines. Not just text: an outline is a UI
+   * boundary, which SC 1.4.11 holds to 3:1, and the fill colours are under even
+   * that — so `outline-[var(--destructive)]` was painting a 2.97:1 edge and
+   * `outline-[var(--accent)]` a 1.97:1 one, i.e. a danger marker nobody could
+   * see. The fill tokens are for BACKGROUNDS ONLY, where white sits on top.
    */
   --destructive-text: #b91c1c; /* 5.11:1 */
-  --accent-text: #0f766e; /* 4.32:1 */
+  --accent-text: #005f5a; /* 5.96:1 — was #0f766e, which measured 4.32:1 */
 
   /* Hairlines. Neumorphic surfaces carry no border, so these are the only
      separator left in long lists — darkened from #c8d0dc (1.23:1), which was

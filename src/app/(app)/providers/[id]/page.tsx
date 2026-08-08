@@ -166,7 +166,7 @@ export default async function ProviderProfilePage({
                           {formatDate(review.createdAt)}
                         </p>
                       </div>
-                      <span className="text-amber-700" aria-label={`${review.rating} stars`}>
+                      <span className="text-amber-800" aria-label={`${review.rating} stars`}>
                         {"★".repeat(review.rating)}
                         <span className="text-[var(--border)]">
                           {"★".repeat(5 - review.rating)}

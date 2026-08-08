@@ -117,7 +117,7 @@ export default async function AdminFraudPage() {
                       {review.isFlagged ? (
                         <Badge tone="danger">Flagged</Badge>
                       ) : null}
-                      <span className="text-amber-700">
+                      <span className="text-amber-800">
                         {"★".repeat(review.rating)}
                       </span>
                     </div>
