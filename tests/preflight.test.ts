@@ -13,6 +13,9 @@ const productionBase = {
   NODE_ENV: "production",
   NEXT_PUBLIC_APP_URL: "https://srn.example",
   DATABASE_URL: "postgresql://user:pw@host:5432/srn",
+  // Required for migrations. Its absence is a warning, so leaving it out here
+  // would make the "fully configured" fixture report a problem.
+  DIRECT_URL: "postgresql://user:pw@host:5432/srn",
   AUTH_PROVIDER: "firebase",
   PAYMENT_PROVIDER: "razorpay",
   OTP_PROVIDER: "sms",
@@ -36,6 +39,46 @@ describe("production configuration", () => {
     expect(
       fatalSettings({ ...productionBase, DATABASE_URL: "file:./dev.db" }),
     ).toContain("DATABASE_URL");
+  });
+
+  it("rejects the transaction pooler without pgbouncer=true", () => {
+    // Also silent, and worse than SQLite to diagnose: transaction-mode
+    // PgBouncer cannot hold prepared statements, so Prisma fails only under
+    // concurrency and looks like intermittent network trouble.
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL: "postgresql://user:pw@host:6543/postgres",
+      }),
+    ).toContain("DATABASE_URL");
+  });
+
+  it("accepts the transaction pooler when pgbouncer=true is present", () => {
+    // The negative case matters as much as the positive one: a check that
+    // flagged every :6543 URL would be indistinguishable from one that works,
+    // and would train people to ignore it.
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL:
+          "postgresql://user:pw@host:6543/postgres?pgbouncer=true&connection_limit=1",
+      }),
+    ).not.toContain("DATABASE_URL");
+  });
+
+  it("warns, but does not fail, when DIRECT_URL is missing", () => {
+    // Deliberately not fatal: the running app never uses DIRECT_URL, only
+    // `prisma migrate` does. A deploy without it serves traffic correctly and
+    // fails at the next migration, which is worth saying but not worth
+    // refusing the deploy over.
+    const env = { ...productionBase };
+    delete env.DIRECT_URL;
+
+    const problems = checkConfiguration(env);
+    expect(problems.map((p) => p.setting)).toContain("DIRECT_URL");
+    expect(fatalProblems(problems).map((p) => p.setting)).not.toContain(
+      "DIRECT_URL",
+    );
   });
 
   it("rejects each development provider in production", () => {

@@ -14,10 +14,34 @@ jobs:
     name: Typecheck, lint, build
     runs-on: ubuntu-latest
 
+    # A real Postgres, because there is no longer a file-shaped alternative.
+    # Throwaway and local to the runner, so no credentials are involved.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: srn
+          POSTGRES_PASSWORD: srn
+          POSTGRES_DB: srn_ci
+        ports:
+          - 5432:5432
+        # Without this the job races the container: steps start before Postgres
+        # accepts connections and `migrate deploy` fails intermittently.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
-      # CI uses a throwaway SQLite file — the build only needs the schema to
-      # generate the Prisma client, not a real database.
-      DATABASE_URL: "file:./ci.db"
+      # No pooler in CI, so DATABASE_URL and DIRECT_URL are the same server.
+      # DIRECT_URL is not optional even here — the schema declares it, and
+      # `prisma migrate` fails with P1012 if it is unset.
+      DATABASE_URL: "postgresql://srn:srn@localhost:5432/srn_ci?schema=public"
+      DIRECT_URL: "postgresql://srn:srn@localhost:5432/srn_ci?schema=public"
+      # Tests get their own schema on the same server — see tests/global-setup.ts,
+      # which refuses to run against `public`.
+      TEST_DATABASE_URL: "postgresql://srn:srn@localhost:5432/srn_ci?schema=srn_test"
       # next build evaluates modules that read these. They are never used to
       # reach Firebase in CI; no network call is made at build time.
       NEXT_PUBLIC_FIREBASE_API_KEY: "ci-placeholder"
@@ -57,7 +81,7 @@ jobs:
 
       - name: Tests
         # Regression tests for bugs that actually shipped or nearly shipped.
-        # They run against a scratch SQLite database, not prisma/dev.db.
+        # They run against the `srn_test` schema, never `public`.
         run: pnpm test
 
       - name: Preflight (development env must be clean)
@@ -72,4 +96,12 @@ jobs:
       - name: Seed and verify the data layer runs
         # Catches repository/mapper breakage that typechecking cannot: the seed
         # exercises every table through real writes.
+        #
+        # SEED_ALLOW_DESTRUCTIVE is required now that the seed refuses every URL
+        # by default. It is safe HERE and nowhere else: the database is a
+        # container that dies with the job. Do not copy this line into a
+        # workflow that touches a real database — wiping it is what the flag
+        # authorises.
         run: pnpm db:seed
+        env:
+          SEED_ALLOW_DESTRUCTIVE: "1"

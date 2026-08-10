@@ -63,6 +63,47 @@ export function checkConfiguration(
     });
   }
 
+  /*
+   * A pooled connection string without `pgbouncer=true`.
+   *
+   * Fatal, and it belongs here precisely because of how it fails: transaction
+   * -mode PgBouncer cannot hold prepared statements across a connection, and
+   * without the flag Prisma emits them anyway. One user never sees it. It
+   * appears under concurrency, as intermittent query errors that look like
+   * network flakiness — the exact silent-failure shape this module exists for.
+   *
+   * Detected by port, since that is what distinguishes Supabase's poolers.
+   */
+  if (databaseUrl.includes(":6543") && !databaseUrl.includes("pgbouncer=true")) {
+    problems.push({
+      severity: "fatal",
+      setting: "DATABASE_URL",
+      message:
+        "Points at the transaction pooler (:6543) without ?pgbouncer=true. " +
+        "Prisma will emit prepared statements the pooler cannot hold, which " +
+        "fails intermittently under concurrent load and not at all in testing. " +
+        "Append ?pgbouncer=true (and &connection_limit=1 on serverless).",
+    });
+  }
+
+  /*
+   * DIRECT_URL is a WARNING, not fatal, and the distinction is deliberate.
+   *
+   * A running app never uses it — only `prisma migrate` does. So a deployment
+   * missing it serves traffic perfectly and then fails the next time anyone
+   * tries to apply a migration, which is a bad moment to discover a missing
+   * variable but not a reason to refuse the deploy.
+   */
+  if (databaseUrl.startsWith("postgres") && !env.DIRECT_URL) {
+    problems.push({
+      severity: "warning",
+      setting: "DIRECT_URL",
+      message:
+        "Not set. The app will run without it, but `prisma migrate` fails with " +
+        "P1012 — so migrations cannot be applied against this environment.",
+    });
+  }
+
   if (isProduction && !env.NEXT_PUBLIC_APP_URL) {
     problems.push({
       severity: "fatal",

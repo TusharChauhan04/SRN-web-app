@@ -3,10 +3,18 @@ import { execSync } from "node:child_process";
 /**
  * Prepares an isolated Postgres schema and migrates it, once per run.
  *
- * This replaces a scratch SQLite file. The property that file gave us for free
- * — a test run cannot possibly touch the database you are developing against —
- * has to be enforced deliberately now that tests share a server with the app,
- * so it is checked below rather than assumed.
+ * This replaces a scratch SQLite file, and it does NOT fully replace what that
+ * file guaranteed. Be precise about the difference:
+ *
+ *   SQLite gave isolation by construction — a separate file cannot reach
+ *   another file. What the checks below give is SCHEMA isolation only. They
+ *   verify the target namespace, never the host, port or database, so a
+ *   TEST_DATABASE_URL aimed at production with ?schema=srn_test passes and then
+ *   drops that schema there. Same server, different namespace.
+ *
+ * That is a deliberate limit, not an oversight: the URL alone cannot tell a
+ * development instance from a production one. Point this at a database you are
+ * willing to lose a schema from.
  *
  * Set TEST_DATABASE_URL to your DIRECT (session-mode, :5432) connection string
  * with a dedicated schema:
@@ -32,12 +40,38 @@ function resolveTestDatabaseUrl(): string {
     );
   }
 
-  let schema: string | null;
+  let schemas: string[];
   try {
-    schema = new URL(url).searchParams.get(REQUIRED_SCHEMA_PARAM);
+    schemas = new URL(url).searchParams.getAll(REQUIRED_SCHEMA_PARAM);
   } catch {
     throw new Error(`TEST_DATABASE_URL is not a valid URL.`);
   }
+
+  /*
+   * `getAll`, not `get`, and exactly one is required.
+   *
+   * `?schema=srn_test&schema=public` is the dangerous shape: JavaScript's
+   * searchParams.get() returns the FIRST value, while the connection string
+   * parser Prisma hands the URL to takes the LAST. The guard would approve
+   * `srn_test` and the reset would drop `public`. Validating with one parser
+   * and destroying with another only works while they happen to agree, so
+   * refuse the ambiguity outright rather than trying to predict it.
+   */
+  if (schemas.length > 1) {
+    throw new Error(
+      `TEST_DATABASE_URL specifies ?schema= ${schemas.length} times ` +
+        `(${schemas.join(", ")}).\n\n` +
+        "This is refused rather than resolved: JavaScript reads the first " +
+        "value and the database connector reads the last, so the schema this " +
+        "check approves need not be the one that gets dropped. Use exactly one.",
+    );
+  }
+
+  // Trimmed and case-folded before comparison. Postgres quotes the identifier,
+  // so "PUBLIC" would not actually hit `public` — it would silently create a
+  // second schema — but a guard that says it blocks `public` should block
+  // every spelling of it rather than merely the lowercase one.
+  const schema = schemas[0]?.trim().toLowerCase() ?? null;
 
   /*
    * These two checks are the whole safety story, and they exist because the
@@ -76,9 +110,12 @@ export async function setup() {
   // is not a file we can delete, so it has to be emptied explicitly.
   // --skip-seed because the suite builds its own fixtures and prisma/seed.ts is
   // development sample data.
+  // `inherit`, not `pipe`: setup can now fail for half a dozen configuration
+  // reasons, and piping reduces all of them to "Command failed: pnpm exec
+  // prisma migrate reset" with Prisma's actual diagnosis discarded.
   execSync("pnpm exec prisma migrate reset --force --skip-seed --skip-generate", {
     env: { ...process.env, DATABASE_URL: url, DIRECT_URL: url },
-    stdio: "pipe",
+    stdio: "inherit",
   });
 }
 
