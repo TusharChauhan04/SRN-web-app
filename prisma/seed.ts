@@ -58,13 +58,27 @@ function assertSafeToWipe(): void {
     );
   }
 
-  if (!url.startsWith("file:")) {
-    throw new Error(
-      `Refusing to seed: DATABASE_URL is not a local SQLite file (${url.split("://")[0] || "unset"}...).\n` +
-        "This script deletes every row in every table. If you genuinely mean to\n" +
-        "wipe this database, re-run with SEED_ALLOW_DESTRUCTIVE=1.",
-    );
-  }
+  /*
+   * Every database is now remote.
+   *
+   * This used to allow any `file:` URL through, because a local SQLite file was
+   * self-evidently disposable. On Postgres there is no such category: the
+   * development database, staging and production are all the same kind of URL,
+   * distinguishable only by host and schema — neither of which this script can
+   * judge safely. So it refuses by default and makes the operator say so.
+   *
+   * Yes, that means `pnpm db:seed` now always needs the flag. That is the point:
+   * the previous version's safety came from a property of the URL that no
+   * longer exists.
+   */
+  throw new Error(
+    `Refusing to seed: this deletes every row in every table, and DATABASE_URL ` +
+      `points at a remote database (${url.split("://")[0] || "unset"}://…).\n\n` +
+      "Unlike the SQLite era there is no 'obviously local' URL to detect — a dev\n" +
+      "database and production look identical from here.\n\n" +
+      "If you genuinely mean to wipe THIS database, re-run with " +
+      "SEED_ALLOW_DESTRUCTIVE=1.",
+  );
 }
 
 async function main() {

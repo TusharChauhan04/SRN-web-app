@@ -1,13 +1,25 @@
-// SRN Web — placeholder schema.
+// SRN Web — Postgres schema.
 //
-// IMPORTANT: SQLite is a PLACEHOLDER. The real database has not been chosen.
-// Nothing in the app imports PrismaClient directly — all access goes through the
-// repository interfaces in src/lib/repositories. See DATABASE.md before swapping.
+// The database is Supabase Postgres. Nothing in the app imports PrismaClient
+// directly — all access goes through the repository interfaces in
+// src/lib/repositories, which is the swap boundary. See DATABASE.md.
 //
-// SQLite constraints reflected here (and what changes on a real DB):
-//   - no native enums     -> roles/statuses are String, validated by Zod at the edge
-//   - no native String[]  -> list fields are comma-joined or JSON strings
-//   - no native Json type -> metadata fields are String holding JSON
+// The list/JSON/enum encodings below are SQLITE-ERA COMPROMISES that were kept
+// deliberately when moving to Postgres:
+//   - list fields stay comma-joined Strings, not native String[]
+//   - metadata fields stay Strings holding JSON, not native Json
+//   - roles/statuses stay Strings validated by Zod, not native enums
+//
+// Postgres supports all three natively, so these COULD be upgraded — but doing
+// it in the same change as the engine swap would mix a mechanical migration
+// with a data-shape rewrite touching mappers.ts and every caller. Kept as-is so
+// this migration stays reversible and reviewable. DATABASE.md §3 step 3 has the
+// upgrade path when someone wants it.
+//
+// Two things genuinely changed with the engine, both isolated:
+//   - RateLimitRepository.hit() is raw dialect-specific SQL (platform.ts)
+//   - text search needs mode: "insensitive"; Postgres LIKE is case-SENSITIVE
+//     where SQLite's was not
 
 generator client {
   provider = "prisma-client-js"
@@ -17,8 +29,28 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
+
+  // Supabase's TRANSACTION-mode pooler (port 6543). Every request the app
+  // serves goes through this.
+  //
+  // `?pgbouncer=true` is not optional: transaction-mode PgBouncer cannot hold
+  // prepared statements across a connection, and without the flag Prisma emits
+  // them anyway and fails intermittently under concurrency — the worst kind of
+  // failure, because a single-user test never reproduces it.
+  //
+  // `&connection_limit=1` matters on Vercel: each serverless invocation is its
+  // own process, so a default pool per invocation multiplies out and exhausts
+  // the pooler. Chat polls every 5s per open tab, which is exactly the shape of
+  // load that finds this.
+  url = env("DATABASE_URL")
+
+  // Supabase's SESSION-mode pooler (port 5432). Migrations only.
+  //
+  // `prisma migrate` takes advisory locks and runs DDL in a session that must
+  // outlive a single transaction, which transaction-mode pooling breaks. This
+  // is never used to serve a request.
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────── Identity & profile ───────────────────────────
