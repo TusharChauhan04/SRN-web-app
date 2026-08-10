@@ -449,22 +449,32 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     limit: number,
     windowMs: number,
   ): Promise<{ allowed: boolean; remaining: number; resetAt: Date }> {
-    const nowMs = Date.now();
-    const resetMs = nowMs + windowMs;
+    const now = new Date();
+    const resetAt = new Date(now.getTime() + windowMs);
 
-    // Prisma stores SQLite DateTime as INTEGER unix-ms, so bind numbers.
-    const rows = await prisma.$queryRaw<
-      { count: number; expiresAt: number }[]
-    >`
+    /*
+     * Datetimes are bound as Date, NOT as unix-ms numbers.
+     *
+     * The SQLite version bound numbers, because Prisma stored DateTime as
+     * INTEGER there and that was the only thing that worked. On Postgres
+     * "expiresAt" is timestamp(3): a bound integer is rejected outright with
+     * 42804 datatype mismatch — on the INSERT and on both CASE comparisons —
+     * so every rate-limited request (login, OTP, message send) would throw.
+     * Loud, not silent, which is the one merciful thing about it.
+     *
+     * The surrounding SQL needed no change: INSERT … ON CONFLICT DO UPDATE …
+     * RETURNING is Postgres-native syntax that SQLite adopted, not the reverse.
+     */
+    const rows = await prisma.$queryRaw<{ count: number; expiresAt: Date }[]>`
       INSERT INTO "RateLimit" ("key", "count", "expiresAt")
-      VALUES (${key}, 1, ${resetMs})
+      VALUES (${key}, 1, ${resetAt})
       ON CONFLICT("key") DO UPDATE SET
         "count" = CASE
-          WHEN "RateLimit"."expiresAt" <= ${nowMs} THEN 1
+          WHEN "RateLimit"."expiresAt" <= ${now} THEN 1
           ELSE "RateLimit"."count" + 1
         END,
         "expiresAt" = CASE
-          WHEN "RateLimit"."expiresAt" <= ${nowMs} THEN ${resetMs}
+          WHEN "RateLimit"."expiresAt" <= ${now} THEN ${resetAt}
           ELSE "RateLimit"."expiresAt"
         END
       RETURNING "count", "expiresAt"
@@ -474,18 +484,20 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     if (!row) {
       // Should be unreachable — RETURNING always yields a row here. Fail
       // closed rather than silently granting unlimited access.
-      return { allowed: false, remaining: 0, resetAt: new Date(resetMs) };
+      return { allowed: false, remaining: 0, resetAt };
     }
 
     const count = Number(row.count);
-    const resetAt = new Date(Number(row.expiresAt));
+    // RETURNING hands back a Date on Postgres. The old code wrapped this in
+    // Number(), which on a Date yields NaN and an Invalid Date reset time.
+    const windowResetAt = new Date(row.expiresAt);
 
     // Opportunistic sweep of expired rows. The key is caller-derived and
     // partly client-influenced, so without this the table grows unbounded.
     // Probabilistic to avoid needing a scheduler.
     if (Math.random() < 0.01) {
       void prisma.rateLimit
-        .deleteMany({ where: { expiresAt: { lt: new Date(nowMs) } } })
+        .deleteMany({ where: { expiresAt: { lt: now } } })
         .catch(() => {
           // Housekeeping only — never fail the request it piggybacks on.
         });
@@ -494,7 +506,7 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     return {
       allowed: count <= limit,
       remaining: Math.max(0, limit - count),
-      resetAt,
+      resetAt: windowResetAt,
     };
   }
 }

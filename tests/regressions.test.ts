@@ -597,3 +597,92 @@ describe("participantIds and participant rows must agree", () => {
     }
   });
 });
+
+/*
+ * Rate limiting had NO tests before the Postgres migration, on either engine.
+ *
+ * That is worth stating plainly, because the code it guards is security
+ * relevant and its own comment describes a real bug it was written to fix: a
+ * read-then-branch version returned a hardcoded `allowed: true` whenever the
+ * window had expired, so every concurrent request at rollover passed. An
+ * attacker could burst, wait one window, and burst again without limit.
+ *
+ * The fix — a single atomic upsert deriving `allowed` from the count the
+ * database actually wrote — was never exercised. These tests exercise it, and
+ * would additionally have caught the migration bug on the first run: the query
+ * bound datetimes as unix-ms integers, which Postgres rejects outright.
+ */
+describe("rate limiting", () => {
+  it("counts hits and refuses past the limit", async () => {
+    const key = `test:basic:${Date.now()}`;
+
+    const first = await repo.rateLimit.hit(key, 3, 60_000);
+    expect(first.allowed).toBe(true);
+    expect(first.remaining).toBe(2);
+
+    await repo.rateLimit.hit(key, 3, 60_000);
+    const third = await repo.rateLimit.hit(key, 3, 60_000);
+    expect(third.allowed).toBe(true);
+    expect(third.remaining).toBe(0);
+
+    const fourth = await repo.rateLimit.hit(key, 3, 60_000);
+    expect(fourth.allowed).toBe(false);
+  });
+
+  it("returns a valid resetAt", async () => {
+    // The SQLite version read the timestamp back with Number(), which yields
+    // NaN on a Date — an Invalid Date that no caller would notice until a
+    // Retry-After header came out as "Invalid Date".
+    const before = Date.now();
+    const { resetAt } = await repo.rateLimit.hit(
+      `test:reset:${Date.now()}`,
+      5,
+      60_000,
+    );
+
+    expect(Number.isNaN(resetAt.getTime())).toBe(false);
+    expect(resetAt.getTime()).toBeGreaterThan(before);
+  });
+
+  it("counts every concurrent hit — the rollover burst cannot over-grant", async () => {
+    // THE security property. Ten simultaneous requests against a limit of five
+    // must allow exactly five. A non-atomic implementation lets all ten read
+    // the same pre-increment count and pass together.
+    const key = `test:concurrent:${Date.now()}`;
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => repo.rateLimit.hit(key, 5, 60_000)),
+    );
+
+    expect(results.filter((r) => r.allowed)).toHaveLength(5);
+  });
+
+  it("starts a fresh window once the previous one expires", async () => {
+    const key = `test:rollover:${Date.now()}`;
+    const shortWindow = 50;
+
+    /*
+     * No assertion about being blocked BETWEEN these two calls.
+     *
+     * The first version of this test opened a 1ms window and expected the very
+     * next hit to be refused. It failed — correctly. Every call here is a
+     * network round trip to a hosted database, so 1ms had long expired before
+     * the second one arrived and the limiter rightly rolled the window over.
+     * The assertion assumed the code could outrun the wire, which was only ever
+     * true against a local SQLite file.
+     *
+     * Refusal within a window is covered by the first test in this block, which
+     * uses a 60s window and does not race anything.
+     */
+    const first = await repo.rateLimit.hit(key, 1, shortWindow);
+    expect(first.allowed).toBe(true);
+
+    await new Promise((r) => setTimeout(r, shortWindow + 100));
+
+    // Past the window: the count must RESET to 1, not keep climbing from the
+    // previous window — that reset is the whole point of the CASE expression.
+    const afterExpiry = await repo.rateLimit.hit(key, 1, 60_000);
+    expect(afterExpiry.allowed).toBe(true);
+    expect(afterExpiry.remaining).toBe(0);
+  });
+});
