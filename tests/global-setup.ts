@@ -74,20 +74,25 @@ function resolveTestDatabaseUrl(): string {
   const schema = schemas[0]?.trim().toLowerCase() ?? null;
 
   /*
-   * These two checks are the whole safety story, and they exist because the
-   * step below is `migrate reset` — it DROPS EVERY TABLE in the schema it is
-   * pointed at.
+   * These two checks are the whole safety story.
    *
-   * Without `?schema=`, Postgres defaults to `public`, which is where the
-   * application's own data lives. A single missing query parameter would turn
-   * `pnpm test` into a command that wipes your development database, with no
-   * error and no warning. Fail closed instead.
+   * Note WHERE the danger is, because it is not in this file. Setup itself is
+   * now additive — CREATE SCHEMA IF NOT EXISTS, then `migrate deploy`, neither
+   * of which can drop anything. The destruction is in the SUITE: `wipe()` in
+   * tests/regressions.test.ts runs `deleteMany()` across every table in
+   * beforeEach, before each of dozens of tests.
+   *
+   * So the guard is not protecting against a reset. It is protecting against
+   * the tests being pointed at the application's own schema and quietly
+   * emptying it, one beforeEach at a time. Without `?schema=`, Postgres
+   * defaults to `public` — which is exactly where the app's data lives. One
+   * missing query parameter, no error, no warning. Fail closed.
    */
   if (!schema) {
     throw new Error(
       "TEST_DATABASE_URL has no ?schema= parameter.\n\n" +
         "Postgres would default to `public` — the schema the application uses — " +
-        "and this setup runs `migrate reset`, which drops every table in it.\n" +
+        "and the suite deletes every row in every table before each test.\n" +
         "Append ?schema=srn_test (or another dedicated name).",
     );
   }
@@ -95,6 +100,8 @@ function resolveTestDatabaseUrl(): string {
   if (schema === "public") {
     throw new Error(
       "TEST_DATABASE_URL points at the `public` schema.\n\n" +
+        "The suite empties every table before each test, and `public` is where " +
+        "the application's data lives.\n" +
         "That is the application's own data, and this setup drops every table " +
         "in the target schema. Use a dedicated schema such as ?schema=srn_test.",
     );
@@ -105,18 +112,43 @@ function resolveTestDatabaseUrl(): string {
 
 export async function setup() {
   const url = resolveTestDatabaseUrl();
+  const env = { ...process.env, DATABASE_URL: url, DIRECT_URL: url };
 
-  // `reset` rather than `deploy`: the schema persists between runs now that it
-  // is not a file we can delete, so it has to be emptied explicitly.
-  // --skip-seed because the suite builds its own fixtures and prisma/seed.ts is
-  // development sample data.
-  // `inherit`, not `pipe`: setup can now fail for half a dozen configuration
-  // reasons, and piping reduces all of them to "Command failed: pnpm exec
-  // prisma migrate reset" with Prisma's actual diagnosis discarded.
-  execSync("pnpm exec prisma migrate reset --force --skip-seed --skip-generate", {
-    env: { ...process.env, DATABASE_URL: url, DIRECT_URL: url },
-    stdio: "inherit",
+  /*
+   * `migrate deploy`, NOT `migrate reset`. This is deliberate and worth keeping.
+   *
+   * The SQLite version deleted a scratch file and then deployed. Translating
+   * "delete the file" into "drop the schema" looks equivalent and is not: reset
+   * is irreversible, needs --force to skip its own confirmation, and would run
+   * on every `pnpm test`. Deploy only ever CREATES — it can add tables, never
+   * drop them or the rows in them.
+   *
+   * Emptying between runs is already handled where it belongs: `wipe()` in
+   * tests/regressions.test.ts runs in beforeEach and clears every table. Setup
+   * does not need to destroy anything to give the suite a clean slate, so it
+   * doesn't.
+   *
+   * Consequence to know: deploy will FAIL rather than silently repair if the
+   * schema has drifted from the migrations. That is the right failure — it asks
+   * a human to look instead of quietly discarding data.
+   */
+  // Postgres will not create a schema implicitly, and the migration no longer
+  // carries a CREATE SCHEMA line (it hardcoded "public", which was wrong).
+  // IF NOT EXISTS makes this idempotent and additive — it cannot drop anything.
+  execSync(`pnpm exec prisma db execute --url "${url}" --stdin`, {
+    env,
+    input: `CREATE SCHEMA IF NOT EXISTS "${schemaNameOf(url)}";`,
+    stdio: ["pipe", "inherit", "inherit"],
   });
+
+  // `inherit`: setup can fail for several configuration reasons, and piping
+  // reduces all of them to "Command failed" with Prisma's diagnosis discarded.
+  execSync("pnpm exec prisma migrate deploy", { env, stdio: "inherit" });
+}
+
+/** The validated schema name, re-read from the URL the guards approved. */
+function schemaNameOf(url: string): string {
+  return new URL(url).searchParams.get(REQUIRED_SCHEMA_PARAM)!.trim();
 }
 
 export async function teardown() {
