@@ -105,7 +105,16 @@ function rateKey(ctx: GatewayContext, tier: RateTier): string {
   // fingerprint so an unidentifiable caller cannot lock out everyone else by
   // sharing one global bucket.
   if (ctx.uid) return `${tier}:uid:${ctx.uid}`;
-  if (ctx.ip) return `${tier}:ip:${ctx.ip}`;
+  // The IP is sliced for the same reason the fingerprint below is, and it began
+  // to matter with Postgres. `RateLimit.key` is TEXT with a btree primary key,
+  // and past ~2704 bytes Postgres refuses the index row outright — so hit()
+  // would throw BEFORE applying any throttling, leaving those requests
+  // unmetered by construction. SQLite had no such limit. `clientIpFrom` does
+  // not validate or bound what a proxy sends, and on a self-hosted deployment
+  // behind a proxy that forwards a client-supplied x-real-ip, that value is
+  // attacker-controlled. (Vercel overwrites the header, so it is not reachable
+  // there.)
+  if (ctx.ip) return `${tier}:ip:${ctx.ip.slice(0, 100)}`;
   return `${tier}:fp:${(ctx.userAgent ?? "unknown").slice(0, 120)}`;
 }
 

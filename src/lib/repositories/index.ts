@@ -47,9 +47,12 @@ import {
 import { PrismaUserRepository } from "./prisma/users";
 
 /**
- * Currently backed by Prisma + SQLite. This is a PLACEHOLDER — the production
- * database has not been chosen. This object is the only line that changes when
- * it is.
+ * Currently backed by Prisma + Supabase Postgres.
+ *
+ * Supabase is a deliberate waypoint, not the destination — the intent is to
+ * move to Azure once the project is ready. This object is the swap point: if
+ * that move is to Azure Database for PostgreSQL it costs a connection string
+ * and nothing here changes at all, because the engine is the same.
  */
 export const repositories: Repositories = {
   users: new PrismaUserRepository(),

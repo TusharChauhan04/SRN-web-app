@@ -449,32 +449,62 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     limit: number,
     windowMs: number,
   ): Promise<{ allowed: boolean; remaining: number; resetAt: Date }> {
-    const now = new Date();
-    const resetAt = new Date(now.getTime() + windowMs);
+    /*
+     * Fail LOUD on a nonsensical window rather than open.
+     *
+     * windowMs <= 0 writes an expiry that is already past, so every subsequent
+     * request takes the reset branch and the limiter is silently off. Negative
+     * is worse: concurrent hits sharing one expired window all reset together,
+     * which is the exact burst hole this design was written to close. A window
+     * beyond ~8.64e15 makes the timestamp invalid and throws from inside the
+     * driver, at a call site that sits before the gateway's try/catch.
+     *
+     * No caller passes these today (see rate limits in gateway/core.ts); this
+     * is here so a future misconfiguration cannot disable throttling quietly.
+     */
+    if (!Number.isFinite(windowMs) || windowMs <= 0) {
+      throw new Error(
+        `Rate limit windowMs must be a positive finite number, got ${windowMs}`,
+      );
+    }
+
+    const windowSeconds = windowMs / 1000;
 
     /*
-     * Datetimes are bound as Date, NOT as unix-ms numbers.
+     * TIME COMES FROM THE DATABASE, not from this process.
      *
-     * The SQLite version bound numbers, because Prisma stored DateTime as
-     * INTEGER there and that was the only thing that worked. On Postgres
-     * "expiresAt" is timestamp(3): a bound integer is rejected outright with
-     * 42804 datatype mismatch — on the INSERT and on both CASE comparisons —
-     * so every rate-limited request (login, OTP, message send) would throw.
-     * Loud, not silent, which is the one merciful thing about it.
+     * `now()` is the transaction timestamp — stable across the whole statement,
+     * so both CASE arms and the INSERT agree by construction.
      *
-     * The surrounding SQL needed no change: INSERT … ON CONFLICT DO UPDATE …
-     * RETURNING is Postgres-native syntax that SQLite adopted, not the reverse.
+     * It used to be `new Date()` bound from Node, which put every instance's
+     * clock inside the trust boundary. The skew is asymmetric and the dangerous
+     * direction is silent: a clock running FAST over-limits and fails closed,
+     * but a clock running SLOW by more than one window writes an expiry that is
+     * already in the past, so the next request from any instance sees an
+     * expired window and resets the count. Every request resets. Rate limiting
+     * is off for every key that instance touches, with no error anywhere.
+     * Same failure class as the bug this method's docstring records, reached
+     * from a different direction.
+     *
+     * (Bound datetimes were also what broke on the SQLite→Postgres move: the
+     * old query passed unix-ms integers into a timestamp(3) column, which
+     * Postgres rejects with 42804. Using now() removes the binding entirely.)
      */
     const rows = await prisma.$queryRaw<{ count: number; expiresAt: Date }[]>`
       INSERT INTO "RateLimit" ("key", "count", "expiresAt")
-      VALUES (${key}, 1, ${resetAt})
+      VALUES (${key}, 1, now() + make_interval(secs => ${windowSeconds}::float8))
       ON CONFLICT("key") DO UPDATE SET
         "count" = CASE
-          WHEN "RateLimit"."expiresAt" <= ${now} THEN 1
+          WHEN "RateLimit"."expiresAt" <= now() THEN 1
           ELSE "RateLimit"."count" + 1
         END,
         "expiresAt" = CASE
-          WHEN "RateLimit"."expiresAt" <= ${now} THEN ${resetAt}
+          WHEN "RateLimit"."expiresAt" <= now()
+            THEN now() + make_interval(secs => ${windowSeconds}::float8)
+          -- PRESERVED, not extended. A sliding window here would let a client
+          -- that retries on 429 push its own unlock further away with every
+          -- attempt — which is exactly what Retry-After encourages it to do —
+          -- and lock itself out permanently.
           ELSE "RateLimit"."expiresAt"
         END
       RETURNING "count", "expiresAt"
@@ -484,7 +514,11 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     if (!row) {
       // Should be unreachable — RETURNING always yields a row here. Fail
       // closed rather than silently granting unlimited access.
-      return { allowed: false, remaining: 0, resetAt };
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(Date.now() + windowMs),
+      };
     }
 
     const count = Number(row.count);
@@ -492,15 +526,34 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
     // Number(), which on a Date yields NaN and an Invalid Date reset time.
     const windowResetAt = new Date(row.expiresAt);
 
-    // Opportunistic sweep of expired rows. The key is caller-derived and
-    // partly client-influenced, so without this the table grows unbounded.
-    // Probabilistic to avoid needing a scheduler.
+    /*
+     * Awaited and bounded, where it used to be floating and unbounded.
+     *
+     * `void`-ing it looked free and was not. With connection_limit=1 — which
+     * this deployment mandates for Vercel — the detached DELETE seizes the
+     * invocation's only connection the moment hit() releases it, and everything
+     * downstream queues behind it; past the 10s pool timeout that surfaces as a
+     * random 500 on 1% of requests. And on serverless it likely never finished
+     * anyway: nothing awaited it, so the invocation froze the moment the
+     * response was written and the DELETE rolled back. A sweep that cannot
+     * complete does not bound the table it exists to bound, and the .catch()
+     * ensured nobody found out.
+     *
+     * LIMIT caps the work so the 1% of requests that pay for it pay a
+     * predictable amount. This still belongs on a scheduler; the comment that
+     * traded a scheduler for probability was assuming a sweep that runs.
+     */
     if (Math.random() < 0.01) {
-      void prisma.rateLimit
-        .deleteMany({ where: { expiresAt: { lt: now } } })
-        .catch(() => {
-          // Housekeeping only — never fail the request it piggybacks on.
-        });
+      try {
+        await prisma.$executeRaw`
+          DELETE FROM "RateLimit"
+          WHERE "key" IN (
+            SELECT "key" FROM "RateLimit" WHERE "expiresAt" < now() LIMIT 1000
+          )
+        `;
+      } catch {
+        // Housekeeping only — never fail the request it piggybacks on.
+      }
     }
 
     return {

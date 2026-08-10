@@ -86,7 +86,7 @@ async function main() {
 
   console.log("Clearing existing data…");
 
-  // Order matters: children before parents, since SQLite enforces FKs.
+  // Order matters: children before parents — Postgres enforces the foreign keys.
   await prisma.rateLimit.deleteMany();
   await prisma.auditEvent.deleteMany();
   await prisma.featureFlag.deleteMany();

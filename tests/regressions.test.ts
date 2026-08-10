@@ -16,7 +16,7 @@ import { TIER_PRICES_MINOR } from "@/lib/providers/payments/index.server";
  */
 
 async function wipe() {
-  // Children before parents — SQLite enforces the foreign keys.
+  // Children before parents — Postgres enforces the foreign keys.
   await prisma.phoneVerification.deleteMany();
   await prisma.rateLimit.deleteMany();
   await prisma.auditEvent.deleteMany();
@@ -641,20 +641,84 @@ describe("rate limiting", () => {
     );
 
     expect(Number.isNaN(resetAt.getTime())).toBe(false);
-    expect(resetAt.getTime()).toBeGreaterThan(before);
+    // Bounded on BOTH sides. `> before` alone passes for a timezone or unit
+    // error in the positive direction — a UTC/local mix-up putting resetAt 5.5
+    // hours out satisfies it, and would surface only as Retry-After: 19800.
+    expect(resetAt.getTime()).toBeGreaterThan(before + 55_000);
+    expect(resetAt.getTime()).toBeLessThan(before + 70_000);
   });
 
   it("counts every concurrent hit — the rollover burst cannot over-grant", async () => {
-    // THE security property. Ten simultaneous requests against a limit of five
-    // must allow exactly five. A non-atomic implementation lets all ten read
-    // the same pre-increment count and pass together.
+    /*
+     * THE security property, and the assertion alone does not establish it.
+     *
+     * "Exactly 5 of N allowed" is also what a SERIAL run of a non-atomic
+     * read-then-branch implementation produces. Whether these calls are
+     * concurrent AT THE DATABASE is decided by Prisma's pool size, which comes
+     * from connection_limit on the URL — so with connection_limit=1 (the shape
+     * .env.example prescribes for DATABASE_URL, one copy-paste away) the pool
+     * serialises everything and this test would happily certify the exact
+     * implementation the atomic upsert exists to replace.
+     *
+     * So the precondition is asserted rather than hoped for, and the fan-out is
+     * far above any plausible pool size so batches still interleave.
+     */
+    const testUrl = process.env.TEST_DATABASE_URL ?? "";
+    expect(
+      testUrl.includes("connection_limit=1"),
+      "TEST_DATABASE_URL must not pin connection_limit=1 — it would serialise " +
+        "this test and make it pass for a non-atomic implementation",
+    ).toBe(false);
+
     const key = `test:concurrent:${Date.now()}`;
+    const FAN_OUT = 100;
+    const LIMIT = 5;
 
     const results = await Promise.all(
-      Array.from({ length: 10 }, () => repo.rateLimit.hit(key, 5, 60_000)),
+      Array.from({ length: FAN_OUT }, () =>
+        repo.rateLimit.hit(key, LIMIT, 60_000),
+      ),
     );
 
-    expect(results.filter((r) => r.allowed)).toHaveLength(5);
+    // Every hit must receive a distinct count, so exactly LIMIT are allowed.
+    expect(results.filter((r) => r.allowed)).toHaveLength(LIMIT);
+
+    // Stronger: the database must have counted all of them. A lost update
+    // shows up here even when the allowed-count happens to look right.
+    const row = await prisma.rateLimit.findUnique({ where: { key } });
+    expect(row?.count).toBe(FAN_OUT);
+  });
+
+  it("preserves the window on refusal — a retrying client cannot extend its own lockout", async () => {
+    /*
+     * Covers the ELSE branch of the expiresAt CASE, which nothing else touches.
+     *
+     * Replace `ELSE "RateLimit"."expiresAt"` with an unconditional assignment
+     * and the limiter becomes a SLIDING window extended by every request,
+     * including refused ones. A client honouring Retry-After and retrying then
+     * pushes its own unlock further out on each attempt and is locked out
+     * permanently. Every other test in this block passes with that mutation.
+     */
+    const key = `test:preserve:${Date.now()}`;
+
+    await repo.rateLimit.hit(key, 1, 60_000);
+    const refused = await repo.rateLimit.hit(key, 1, 60_000);
+    expect(refused.allowed).toBe(false);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const refusedAgain = await repo.rateLimit.hit(key, 1, 60_000);
+    expect(refusedAgain.allowed).toBe(false);
+    // The expiry must not have moved by the later request.
+    expect(refusedAgain.resetAt.getTime()).toBe(refused.resetAt.getTime());
+  });
+
+  it("rejects a non-positive window rather than silently disabling itself", async () => {
+    // windowMs <= 0 writes an already-expired window, so every request takes
+    // the reset branch and throttling is off with no error at all.
+    await expect(
+      repo.rateLimit.hit(`test:badwindow:${Date.now()}`, 5, 0),
+    ).rejects.toThrow(/positive finite/i);
   });
 
   it("starts a fresh window once the previous one expires", async () => {
@@ -674,15 +738,19 @@ describe("rate limiting", () => {
      * Refusal within a window is covered by the first test in this block, which
      * uses a 60s window and does not race anything.
      */
-    const first = await repo.rateLimit.hit(key, 1, shortWindow);
+    // limit 2, not 1. With limit 1 the assertion `remaining === 0` holds
+    // whether the count reset to 1 or climbed to 2, so the test could not tell
+    // a working reset from an always-allow stub. With limit 2, remaining === 1
+    // is produced ONLY by a genuine reset to count 1.
+    const first = await repo.rateLimit.hit(key, 2, shortWindow);
     expect(first.allowed).toBe(true);
 
     await new Promise((r) => setTimeout(r, shortWindow + 100));
 
     // Past the window: the count must RESET to 1, not keep climbing from the
     // previous window — that reset is the whole point of the CASE expression.
-    const afterExpiry = await repo.rateLimit.hit(key, 1, 60_000);
+    const afterExpiry = await repo.rateLimit.hit(key, 2, 60_000);
     expect(afterExpiry.allowed).toBe(true);
-    expect(afterExpiry.remaining).toBe(0);
+    expect(afterExpiry.remaining).toBe(1);
   });
 });
