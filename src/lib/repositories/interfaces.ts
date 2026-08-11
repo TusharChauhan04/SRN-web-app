@@ -670,6 +670,23 @@ export interface RateLimitRepository {
   /**
    * Atomically increments the counter for `key` and reports whether the caller
    * is over `limit` within `windowMs`.
+   *
+   * ATOMICALLY is a requirement, not a description of one implementation. A
+   * read-then-branch version of this shipped once and was wrong: every
+   * concurrent request at window rollover saw the same pre-increment count and
+   * passed, so a caller could burst, wait one window, and burst again without
+   * limit. `allowed` must be derived from the count the store actually wrote.
+   *
+   * The window is FIXED, not sliding: a refused call must not push `resetAt`
+   * further out, or a client honouring Retry-After extends its own lockout on
+   * every retry and never recovers.
+   *
+   * MUST THROW on a non-positive or non-finite `windowMs` rather than
+   * returning. Such a window writes an already-expired entry, so every
+   * subsequent call takes the reset path and throttling is silently off — the
+   * same failure as the bug above, reached by configuration instead of by a
+   * race. Failing loudly is the contract; this is stated here because it is
+   * the kind of guard a second implementation would quietly omit.
    */
   hit(
     key: string,

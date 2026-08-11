@@ -1,10 +1,43 @@
 # Database
 
-**Status: the production database for this app has not been chosen.**
+**Status: Supabase Postgres. Migrated 8 Aug 2026 — SQLite is gone.**
 
-Everything here is built so that decision can be made later without a rewrite.
-Read this file before touching the data layer, and before wiring up a real
-database.
+Supabase is a deliberate waypoint, not the destination: the intent is to move to
+Azure once the project is ready. That move is cheap **only if Azure Database for
+PostgreSQL is the target** — same engine, so it costs a connection string and
+nothing else. Azure SQL would mean rewriting the raw SQL in
+`RateLimitRepository.hit()` a second time (T-SQL has no `ON CONFLICT`) and
+revisiting every `mode: "insensitive"` clause; Cosmos DB would mean rebuilding
+the data layer, because it has no unique constraints and this app depends on
+ten of them being enforced.
+
+Read this file before touching the data layer.
+
+### What the migration actually changed
+
+Almost nothing, which was the point of the repository boundary — **zero files
+under `src/app/` or `src/components/`**. Only two behaviours genuinely differed
+between the engines, and both were silent:
+
+1. **`LIKE` is case-SENSITIVE on Postgres** and was not on SQLite. Every
+   `contains` clause on user-supplied text needs `mode: "insensitive"`, or the
+   search returns nothing and looks like "no results" rather than a bug. The
+   worst case was skills: `joinList` stores list columns as typed while
+   `listTokenMatch` lowercases the query, so a provider who listed "React" was
+   unfindable by *every* query. `prisma/seed.ts` cannot surface this — every
+   skill in it is already lowercase.
+2. **`RateLimitRepository.hit()` bound datetimes as unix-ms integers**, which
+   SQLite stored natively and Postgres rejects outright (42804). It now uses the
+   database clock via `now()` rather than the application's, which also removes
+   instance clock skew from the trust boundary.
+
+### Things that did NOT change, deliberately
+
+The SQLite-era encodings stay: lists are comma-joined `String`, JSON lives in
+`String`, roles and statuses are `String` validated by Zod. Postgres supports
+all three natively, but upgrading them alongside an engine swap would mix a
+mechanical migration with a data-shape rewrite across `mappers.ts` and every
+caller. §3 step 3 below is still the upgrade path when someone wants it.
 
 ---
 
@@ -24,7 +57,7 @@ database.
    src/lib/repositories/prisma/*.ts     ← the ONLY code that knows about SQL
               │
               ▼
-   src/lib/db/client.ts  →  @prisma/client  →  SQLite (PLACEHOLDER)
+   src/lib/db/client.ts  →  @prisma/client  →  Supabase Postgres
 ```
 
 **The rule:** no page, component, or Route Handler imports `PrismaClient`, the
@@ -44,14 +77,17 @@ that's the abstraction leaking — fix it there rather than at the call site.
 | Piece | Current | Why |
 |---|---|---|
 | ORM | Prisma 6 | Datasource provider is swappable by config, so Postgres/MySQL is a small change. Pinned to 6 deliberately — Prisma 7 moves the connection URL out of the schema and requires driver adapters, which adds moving parts for no benefit here. |
-| Database | SQLite (`prisma/dev.db`) | Zero-setup local development. **Not viable in production** — see §5. |
-| Migrations | `prisma/migrations/` | Real migration history, not `db push`. Treated with the same rigour as a production database. |
-| Seed | `prisma/seed.ts` | 9 users across all 5 roles + every major entity. |
+| Database | Supabase Postgres | Two URLs, and which is which matters: `DATABASE_URL` is the transaction pooler (`:6543`, needs `?pgbouncer=true&connection_limit=1`), `DIRECT_URL` is the session pooler (`:5432`, migrations only). See the datasource comments in `schema.prisma`. |
+| Migrations | `prisma/migrations/` | Regenerated from scratch for Postgres — the SQLite DDL could not apply. Real migration history, not `db push`. |
+| Seed | `prisma/seed.ts` | 9 users across all 5 roles + every major entity. **Now refuses to run without `SEED_ALLOW_DESTRUCTIVE=1`** — there is no longer an "obviously local" URL it can recognise as safe. |
+| Tests | `?schema=srn_test` | The suite needs `TEST_DATABASE_URL` with a dedicated schema. It deletes every row before each test, so `global-setup.ts` refuses a URL with no `?schema=`, one naming `public`, or one specifying `?schema=` twice. |
 
-### SQLite compromises encoded in the schema
+### Encodings kept from the SQLite era
 
-These exist because SQLite lacks the types, and they are all isolated in
-`src/lib/repositories/prisma/mappers.ts`:
+Still comma-joined lists, JSON-in-String and String enums, all isolated in
+`src/lib/repositories/prisma/mappers.ts`. Postgres supports native `String[]`,
+`Json` and `enum` — see §3 step 3 — but they were left alone so the engine swap
+stayed mechanical and reversible:
 
 Mapper inputs are typed against the generated Prisma models, so the compiler
 catches a column rename. The conversions below are what the mappers exist to
@@ -62,7 +98,22 @@ do; the types make sure they are converting a field that still exists.
 | `string[]` (skills, privileges, evidence URLs) | no array type | comma-joined `String`, split in mappers | native `String[]`, drop the splitting |
 | `Json` (notification data, audit metadata) | no JSON type | `String` holding JSON, parsed in mappers | native `Json` |
 | enums (role, status) | no enums | `String` + Zod validation at the edge | native enums |
-| case-insensitive search | no `mode: "insensitive"` | plain `contains` (case-sensitive) | add `mode: "insensitive"` |
+| case-insensitive search | LIKE already case-INsensitive for ASCII | plain `contains` | ✅ DONE — `mode: "insensitive"` on all 12 clauses |
+
+> **This table used to say SQLite's `contains` was case-SENSITIVE. It was the
+> other way round, and getting it backwards made the risk look like a cosmetic
+> improvement instead of a regression waiting to happen.** SQLite's LIKE is
+> ASCII-case-insensitive by default, so the app relied on that without saying
+> so; Postgres is case-sensitive, so every one of those clauses silently
+> stopped matching. Verified by two tests that failed before the fix and pass
+> after — see `describe("case-insensitive search")` in tests/regressions.test.ts.
+>
+> Cost check, since it is the obvious worry: **none.** `contains` compiles to a
+> leading-wildcard pattern (`%q%`), which a btree index cannot serve in either
+> direction, so `LIKE` and `ILIKE` produce byte-identical query plans and costs.
+> Confirmed with EXPLAIN against the live database. No `pg_trgm` needed. If
+> these searches ever need to be fast, that is a separate piece of work — a
+> trigram or expression index — and unrelated to this change.
 
 The last one is a **real behavioural difference**: provider search is currently
 case-sensitive. On a real database this becomes correct by adding one option.

@@ -53,6 +53,37 @@ describe("production configuration", () => {
     ).toContain("DATABASE_URL");
   });
 
+  it("detects a pooler on Azure's port and by hostname, not just Supabase's", () => {
+    // Port alone is vendor-specific — Supabase uses 6543, Azure's built-in
+    // PgBouncer uses 6432. Matching only 6543 would make this check go inert
+    // on the planned move to Azure, which is a false negative: the misconfigured
+    // URL passes preflight and fails later under load.
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL: "postgresql://user:pw@myserver.postgres.database.azure.com:6432/postgres",
+      }),
+    ).toContain("DATABASE_URL");
+
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL: "postgresql://user:pw@aws-0-ap-south-1.pooler.example.com:5432/postgres",
+      }),
+    ).toContain("DATABASE_URL");
+  });
+
+  it("does not flag a plain direct connection as a pooler", () => {
+    // The negative case: a check that flagged every Postgres URL would be
+    // indistinguishable from one that works, and would train people to ignore it.
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL: "postgresql://user:pw@db.internal:5432/srn",
+      }),
+    ).not.toContain("DATABASE_URL");
+  });
+
   it("accepts the transaction pooler when pgbouncer=true is present", () => {
     // The negative case matters as much as the positive one: a check that
     // flagged every :6543 URL would be indistinguishable from one that works,

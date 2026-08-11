@@ -72,16 +72,26 @@ export function checkConfiguration(
    * appears under concurrency, as intermittent query errors that look like
    * network flakiness — the exact silent-failure shape this module exists for.
    *
-   * Detected by port, since that is what distinguishes Supabase's poolers.
+   * Detected by port OR by a pooler-shaped host, because port alone is
+   * vendor-specific: Supabase's transaction pooler is 6543 and Azure Database
+   * for PostgreSQL's built-in PgBouncer is 6432. Matching only 6543 would make
+   * this check go silently inert on the move to Azure — a FALSE NEGATIVE, which
+   * is worse than no check at all: a pooled Azure URL missing the flag would
+   * pass preflight and then fail intermittently under load, which is precisely
+   * what this exists to prevent.
    */
-  if (databaseUrl.includes(":6543") && !databaseUrl.includes("pgbouncer=true")) {
+  const looksPooled =
+    databaseUrl.includes(":6543") || // Supabase transaction pooler
+    databaseUrl.includes(":6432") || // Azure / standard PgBouncer
+    /[/@][^/@]*pooler[^/@]*/.test(databaseUrl); // hostname says so
+  if (looksPooled && !databaseUrl.includes("pgbouncer=true")) {
     problems.push({
       severity: "fatal",
       setting: "DATABASE_URL",
       message:
-        "Points at the transaction pooler (:6543) without ?pgbouncer=true. " +
-        "Prisma will emit prepared statements the pooler cannot hold, which " +
-        "fails intermittently under concurrent load and not at all in testing. " +
+        "Points at a transaction pooler without ?pgbouncer=true. Prisma will " +
+        "emit prepared statements the pooler cannot hold, which fails " +
+        "intermittently under concurrent load and not at all in testing. " +
         "Append ?pgbouncer=true (and &connection_limit=1 on serverless).",
     });
   }
