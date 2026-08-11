@@ -754,3 +754,49 @@ describe("rate limiting", () => {
     expect(afterExpiry.remaining).toBe(1);
   });
 });
+
+/*
+ * Case sensitivity is one of only TWO behaviours the SQLite -> Postgres move
+ * genuinely changed, and it is the silent one.
+ *
+ * SQLite's LIKE is ASCII-case-insensitive by default. Postgres's is not, and
+ * Prisma needs `mode: "insensitive"` stated explicitly. Nothing errors when it
+ * is missing — a search just returns nothing, which looks like "no results"
+ * rather than a bug.
+ *
+ * The skill case is worse than free-text search, because the mismatch is
+ * BUILT IN rather than depending on what a user types: joinList() stores list
+ * columns exactly as entered (it trims, it does not lowercase), while
+ * listTokenMatch() lowercases the query. So a provider who listed "React"
+ * cannot be found by any query at all on Postgres, including "React".
+ *
+ * The seed cannot catch this — every skill in prisma/seed.ts is already
+ * lowercase, so a run against real user data is the first time it appears.
+ */
+describe("case-insensitive search (Postgres LIKE is case-sensitive)", () => {
+  it("finds a provider whose skill was stored capitalised", async () => {
+    await makeUser("cased-provider", "digital", ["React", "NextJS"]);
+
+    const lower = await repo.users.searchProviders({ skills: ["react"] });
+    expect(lower.items.map((u) => u.id)).toContain("cased-provider");
+
+    // And the same query in the stored casing must work too — it does not on a
+    // case-sensitive LIKE either, because the QUERY side is lowercased.
+    const exact = await repo.users.searchProviders({ skills: ["React"] });
+    expect(exact.items.map((u) => u.id)).toContain("cased-provider");
+  });
+
+  it("matches free-text profile search regardless of case", async () => {
+    await makeUser("cased-text", "digital", []);
+    await repo.users.update("cased-text", {
+      title: "Senior Frontend Engineer",
+      location: "Mumbai",
+    });
+
+    const byTitle = await repo.users.searchProviders({ query: "frontend" });
+    expect(byTitle.items.map((u) => u.id)).toContain("cased-text");
+
+    const byLocation = await repo.users.searchProviders({ location: "mumbai" });
+    expect(byLocation.items.map((u) => u.id)).toContain("cased-text");
+  });
+});

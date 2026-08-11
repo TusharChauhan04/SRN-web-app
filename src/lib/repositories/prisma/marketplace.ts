@@ -88,18 +88,25 @@ export class PrismaRequirementRepository implements RequirementRepository {
       ...(filter.maxBudget !== undefined && {
         minBudget: { lte: filter.maxBudget },
       }),
+      // `mode: "insensitive"` throughout: Postgres LIKE is case-sensitive where
+      // SQLite's was not, and a missing clause fails silently as "no results".
       ...(query && {
         OR: [
-          { title: { contains: query } },
-          { description: { contains: query } },
-          { category: { contains: query } },
+          { title: { contains: query, mode: "insensitive" as const } },
+          { description: { contains: query, mode: "insensitive" as const } },
+          { category: { contains: query, mode: "insensitive" as const } },
         ],
       }),
       // Exact-token match per skill (see query.ts) — unanchored matching
-      // returned "javascript" requirements for a "java" filter.
+      // returned "javascript" requirements for a "java" filter. Insensitive
+      // because skillsNeeded is stored as entered while the query is
+      // lowercased, so "React" would otherwise match nothing at all.
       ...(filter.skills?.length && {
         AND: filter.skills.map((s) => ({
-          skillsNeeded: { contains: listTokenMatch(s) },
+          skillsNeeded: {
+            contains: listTokenMatch(s),
+            mode: "insensitive" as const,
+          },
         })),
       }),
     };
@@ -138,9 +145,15 @@ export class PrismaRequirementRepository implements RequirementRepository {
     // the dashboard labels "Matched to your skills".
     const where = {
       status: "open",
+      // Insensitive for the same reason as above — this is the feed the
+      // dashboard labels "Matched to your skills", so a case mismatch here
+      // empties a provider's entire home screen with no error.
       ...(skills.length > 0 && {
         OR: skills.map((s) => ({
-          skillsNeeded: { contains: listTokenMatch(s) },
+          skillsNeeded: {
+            contains: listTokenMatch(s),
+            mode: "insensitive" as const,
+          },
         })),
       }),
     };

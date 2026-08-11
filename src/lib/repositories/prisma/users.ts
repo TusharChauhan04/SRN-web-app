@@ -36,17 +36,20 @@ import { listTokenMatch, sanitizeSearchTerm, searchTerm } from "./query";
  * "@company.com" both filtered by and returned other people's addresses — a
  * ready-made harvesting endpoint on the public provider search.
  *
- * Case sensitivity: this relies on SQLite's LIKE being ASCII-case-insensitive
- * by default. On Postgres each clause needs `mode: "insensitive"` explicitly —
- * one of the few genuinely dialect-specific spots. Noted in DATABASE.md.
+ * Case sensitivity: `mode: "insensitive"` is REQUIRED, not decorative. SQLite's
+ * LIKE was ASCII-case-insensitive by default and Postgres's is not, so without
+ * it "frontend" stops matching "Frontend" — and nothing errors. The search just
+ * returns nothing, which reads as "no results" rather than as a bug. Do not
+ * drop it from any clause here.
  */
 function textFilter(query: string) {
   const q = sanitizeSearchTerm(query);
+  const like = { contains: q, mode: "insensitive" as const };
   return [
-    { name: { contains: q } },
-    { title: { contains: q } },
-    { bio: { contains: q } },
-    { location: { contains: q } },
+    { name: like },
+    { title: like },
+    { bio: like },
+    { location: like },
   ];
 }
 
@@ -58,7 +61,10 @@ function textFilter(query: string) {
  */
 function adminTextFilter(query: string) {
   const q = sanitizeSearchTerm(query);
-  return [...textFilter(query), { email: { contains: q } }];
+  return [
+    ...textFilter(query),
+    { email: { contains: q, mode: "insensitive" as const } },
+  ];
 }
 
 export class PrismaUserRepository implements UserRepository {
@@ -193,14 +199,29 @@ export class PrismaUserRepository implements UserRepository {
         hourlyRate: { lte: filter.maxHourlyRate },
       }),
       ...(filter.location && {
-        location: { contains: sanitizeSearchTerm(filter.location) },
+        location: {
+          contains: sanitizeSearchTerm(filter.location),
+          mode: "insensitive" as const,
+        },
       }),
       ...(query && { OR: textFilter(query) }),
-      // Exact-token match per skill — an unanchored `contains` matched
-      // "javascript" for a search of "java" and "repair" for "air".
+      /*
+       * Exact-token match per skill — an unanchored `contains` matched
+       * "javascript" for a search of "java" and "repair" for "air".
+       *
+       * `mode: "insensitive"` is REQUIRED here, and this is the one place it is
+       * not merely about what a user typed. `joinList` stores list columns
+       * exactly as entered — it trims, it does not lowercase — while
+       * `listTokenMatch` lowercases the query. So the mismatch is built in: on
+       * a case-sensitive LIKE a provider who listed "React" is unfindable by
+       * EVERY query, including "React" itself.
+       *
+       * prisma/seed.ts cannot surface this, because every skill in it is
+       * already lowercase. Only real user data shows it.
+       */
       ...(filter.skills?.length && {
         AND: filter.skills.map((s) => ({
-          skills: { contains: listTokenMatch(s) },
+          skills: { contains: listTokenMatch(s), mode: "insensitive" as const },
         })),
       }),
     };
