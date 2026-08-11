@@ -73,6 +73,37 @@ describe("production configuration", () => {
     ).toContain("DATABASE_URL");
   });
 
+  it("accepts supabase storage when it is fully configured", () => {
+    expect(
+      checkConfiguration({
+        ...productionBase,
+        STORAGE_PROVIDER: "supabase",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+        SUPABASE_STORAGE_BUCKET: "uploads",
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects supabase storage selected without its credentials", () => {
+    // Distinct from a misspelling: the value is correct, so the provider is
+    // selected happily and then throws on the first upload — at which point the
+    // failing thing is a user's KYC submission, not a deploy.
+    const problems = fatalSettings({
+      ...productionBase,
+      STORAGE_PROVIDER: "supabase",
+      // credentials deliberately absent
+    });
+    expect(problems).toContain("STORAGE_PROVIDER");
+  });
+
+  it("still rejects a misspelled storage provider", () => {
+    // Adding 'supabase' to the known list must not widen what counts as valid.
+    expect(
+      fatalSettings({ ...productionBase, STORAGE_PROVIDER: "supabse" }),
+    ).toContain("STORAGE_PROVIDER");
+  });
+
   it("does not flag a plain direct connection as a pooler", () => {
     // The negative case: a check that flagged every Postgres URL would be
     // indistinguishable from one that works, and would train people to ignore it.

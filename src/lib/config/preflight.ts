@@ -154,18 +154,43 @@ export function checkConfiguration(
    * path can quietly end up on local disk.
    */
   const storage = (env.STORAGE_PROVIDER ?? "").toLowerCase();
-  const resolvedStorage = storage === "firebase" ? "firebase" : "local";
+  const KNOWN_STORAGE = ["local", "firebase", "supabase"];
+  const resolvedStorage = KNOWN_STORAGE.includes(storage) ? storage : "local";
   if (isProduction && resolvedStorage === "local") {
     problems.push({
       severity: "fatal",
       setting: "STORAGE_PROVIDER",
       message:
         storage && storage !== "local"
-          ? `Unrecognised value "${env.STORAGE_PROVIDER}" — the only supported ` +
-            "values are 'local' and 'firebase'. Check the spelling."
+          ? `Unrecognised value "${env.STORAGE_PROVIDER}" — supported values ` +
+            "are 'local', 'supabase' and 'firebase'. Check the spelling."
           : "Local file storage in production. Uploads — including KYC identity " +
             "documents — are written to an ephemeral per-instance disk and lost.",
     });
+  }
+
+  /*
+   * A selected provider with no credentials is its own failure, and a distinct
+   * one: the value is spelled correctly, so the check above passes, and the app
+   * then throws on the first upload rather than at deploy time.
+   */
+  if (isProduction && resolvedStorage === "supabase") {
+    const missing = [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_STORAGE_BUCKET",
+    ].filter((k) => !env[k]);
+
+    if (missing.length > 0) {
+      problems.push({
+        severity: "fatal",
+        setting: "STORAGE_PROVIDER",
+        message:
+          `STORAGE_PROVIDER=supabase but ${missing.join(", ")} ` +
+          `${missing.length === 1 ? "is" : "are"} unset. Uploads and every KYC ` +
+          "document read would throw on first use.",
+      });
+    }
   }
 
   if (isProduction && !env.STORAGE_SIGNING_SECRET) {
