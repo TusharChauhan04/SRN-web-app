@@ -80,10 +80,25 @@ export function checkConfiguration(
    * pass preflight and then fail intermittently under load, which is precisely
    * what this exists to prevent.
    */
+  /*
+   * TRANSACTION pooling is indicated by the PORT, not the hostname.
+   *
+   * A hostname containing "pooler" is not enough, and matching on it alone was
+   * a false positive: Supabase serves BOTH modes from the same host, and its
+   * SESSION pooler on :5432 supports prepared statements perfectly well.
+   * Flagging that as fatal condemned a legitimate configuration — and a check
+   * that cries wolf is one people learn to skip, which is worse than not having
+   * it. It was caught by a smoke run whose only diff was healthz turning 503.
+   *
+   * The hostname clause is kept, but only where the port is NOT the session
+   * default, so a future vendor using an unusual transaction port is still
+   * caught while :5432 is left alone.
+   */
+  const isSessionPort = databaseUrl.includes(":5432");
   const looksPooled =
     databaseUrl.includes(":6543") || // Supabase transaction pooler
     databaseUrl.includes(":6432") || // Azure / standard PgBouncer
-    /[/@][^/@]*pooler[^/@]*/.test(databaseUrl); // hostname says so
+    (/[/@][^/@]*pooler[^/@]*/.test(databaseUrl) && !isSessionPort);
   if (looksPooled && !databaseUrl.includes("pgbouncer=true")) {
     problems.push({
       severity: "fatal",

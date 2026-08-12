@@ -75,12 +75,35 @@ describe("production configuration", () => {
       }),
     ).toContain("DATABASE_URL");
 
+    // A pooler HOSTNAME on a non-session port is still caught, so a vendor
+    // using an unusual transaction port does not slip through.
     expect(
       fatalSettings({
         ...productionBase,
-        DATABASE_URL: "postgresql://user:pw@aws-0-ap-south-1.pooler.example.com:5432/postgres",
+        DATABASE_URL: "postgresql://user:pw@aws-0-ap-south-1.pooler.example.com:7777/postgres",
       }),
     ).toContain("DATABASE_URL");
+  });
+
+  it("does NOT flag the session pooler on :5432", () => {
+    /*
+     * The false positive this replaced. Supabase serves both modes from the
+     * same hostname, and the SESSION pooler on :5432 supports prepared
+     * statements — pgbouncer=true is unnecessary there, and adding it would
+     * disable prepared statements for no reason.
+     *
+     * Matching "pooler" in the hostname alone condemned that configuration as
+     * fatal. Found because a smoke run's only difference from baseline was
+     * /api/healthz turning 503, in development, where nothing should have been
+     * fatal at all.
+     */
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL:
+          "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?schema=x",
+      }),
+    ).not.toContain("DATABASE_URL");
   });
 
   it("accepts supabase storage when it is fully configured", () => {

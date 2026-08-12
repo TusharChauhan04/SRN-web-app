@@ -71,7 +71,7 @@ const nextConfig: NextConfig = {
    * runtime `require`, which the bundler cannot trace. Marking these external
    * keeps them in node_modules at runtime instead of being bundled.
    */
-  serverExternalPackages: ["@prisma/client", "firebase-admin"],
+  serverExternalPackages: ["@prisma/client"],
 
   async headers() {
     return [
