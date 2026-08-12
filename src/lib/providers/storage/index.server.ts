@@ -371,31 +371,65 @@ class SupabaseStorageProvider implements StorageProvider {
 
   async exists(storageKey: string): Promise<boolean> {
     const { bucket } = this.config();
-    // HEAD on the authenticated object path — 200 when present, 404 when not.
     const res = await this.call("HEAD", `object/${bucket}/${storageKey}`);
-    return res.ok;
+    if (res.ok) return true;
+
+    /*
+     * A missing object answers 400 here, not 404 — verified against the API.
+     * So "not ok" cannot simply mean "absent": 401/403 mean the credentials are
+     * wrong, and reporting that as "absent" would make `uploads.confirm` reject
+     * a file the user really did upload, blaming them for our misconfiguration.
+     */
+    if (res.status === 401 || res.status === 403) {
+      throw new StorageError(
+        `Storage rejected our credentials (${res.status}). Check ` +
+          "SUPABASE_SERVICE_ROLE_KEY — the anon key will not work here.",
+        "storage/unauthorised",
+      );
+    }
+    return false;
   }
 
   async delete(storageKey: string): Promise<void> {
     const { bucket } = this.config();
     const res = await this.call("DELETE", `object/${bucket}/${storageKey}`);
+    if (res.ok) return;
 
     /*
-     * 404 is success — already gone IS the desired end state. Nothing else is.
+     * Deleting something already gone IS the desired end state. Nothing else is.
      *
-     * The local provider learned this the hard way: a blanket `.catch(() => {})`
-     * swallowed permission errors as success, which made the erasure guard in
-     * eraseUserData unreachable. It aborts before anonymising when a delete
-     * rejects, and no delete could ever reject — so erasure reported success and
-     * then destroyed the Upload rows, leaving identity documents in the bucket
-     * with nothing pointing at them.
+     * The status code cannot decide this. Supabase answers a missing object with
+     * HTTP 400 and puts the real outcome in the BODY:
+     *
+     *   {"statusCode":"404","error":"not_found","code":"NoSuchKey"}
+     *
+     * so treating 400 as success would swallow every genuine failure, and
+     * treating it as failure breaks idempotent deletion. The body is parsed
+     * instead. This is precisely the mistake the local provider made in the
+     * other direction: a blanket `.catch(() => {})` swallowed permission errors
+     * as success, which made the erasure guard in eraseUserData unreachable —
+     * it aborts before anonymising when a delete rejects, and no delete could
+     * ever reject. Erasure reported success and then destroyed the Upload rows,
+     * leaving identity documents in storage with nothing pointing at them.
+     *
+     * KNOWN LIMIT, measured not assumed: a nonexistent BUCKET returns the same
+     * NoSuchKey body, so this cannot tell "object absent" from "bucket wrong".
+     * Accepted because a wrong bucket fails loudly on upload and on every read
+     * long before any delete runs — it is not a state that reaches here quietly.
      */
-    if (!res.ok && res.status !== 404) {
-      throw new StorageError(
-        `Could not delete ${storageKey} (${res.status}).`,
-        "storage/delete-failed",
-      );
+    let notFound = false;
+    try {
+      const body = (await res.json()) as { code?: string; statusCode?: string };
+      notFound = body.code === "NoSuchKey" || body.statusCode === "404";
+    } catch {
+      // Unparseable body — treat as a real failure, below.
     }
+    if (notFound) return;
+
+    throw new StorageError(
+      `Could not delete ${storageKey} (${res.status}).`,
+      "storage/delete-failed",
+    );
   }
 }
 

@@ -193,7 +193,21 @@ export function checkConfiguration(
     }
   }
 
-  if (isProduction && !env.STORAGE_SIGNING_SECRET) {
+  /*
+   * Only the LOCAL provider signs its own URLs, so only it needs this secret.
+   *
+   * It used to be demanded unconditionally in production, which became a false
+   * fatal the moment a real storage backend existed: Supabase signs its own
+   * URLs, and all three local storage routes early-return unless the provider
+   * is `local`, so `signStoragePath` cannot execute. Preflight was refusing a
+   * correct configuration over a secret nothing would read — and a check that
+   * cannot be satisfied meaningfully is one people learn to ignore, which costs
+   * far more than it saves.
+   *
+   * Nothing is weakened: running local storage in production is already fatal
+   * above, for the stronger reason that the files do not survive a deploy.
+   */
+  if (isProduction && resolvedStorage === "local" && !env.STORAGE_SIGNING_SECRET) {
     problems.push({
       severity: "fatal",
       setting: "STORAGE_SIGNING_SECRET",

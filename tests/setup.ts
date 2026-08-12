@@ -25,5 +25,17 @@ env.DIRECT_URL = process.env.TEST_DATABASE_URL!;
 env.NODE_ENV = "test";
 env.AUTH_PROVIDER = "mock";
 env.PAYMENT_PROVIDER = "mock";
-env.STORAGE_PROVIDER = "local";
 env.OTP_PROVIDER = "console";
+
+/*
+ * Storage is forced to `local` so no ordinary test can reach a real bucket —
+ * but the real value is preserved first.
+ *
+ * tests/storage.test.ts needs to know what is actually configured in order to
+ * decide whether to exercise the live provider. Without this it read the
+ * overridden value, its guard never matched, and the whole suite reported
+ * "passed" while silently skipping the only test that touches storage. A
+ * skipped test is not a passing one, and this is the shape that hides it.
+ */
+env.__REAL_STORAGE_PROVIDER = process.env.STORAGE_PROVIDER ?? "local";
+env.STORAGE_PROVIDER = "local";

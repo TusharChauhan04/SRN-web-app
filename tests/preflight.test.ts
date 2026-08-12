@@ -97,6 +97,22 @@ describe("production configuration", () => {
     expect(problems).toContain("STORAGE_PROVIDER");
   });
 
+  it("does not demand a local signing secret when storage is supabase", () => {
+    // Supabase signs its own URLs, and every local storage route early-returns
+    // unless the provider is `local`, so signStoragePath cannot run. Demanding
+    // the secret anyway made preflight refuse a correct configuration.
+    const env: NodeJS.ProcessEnv = {
+      ...productionBase,
+      STORAGE_PROVIDER: "supabase",
+      SUPABASE_URL: "https://project.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      SUPABASE_STORAGE_BUCKET: "uploads",
+    };
+    delete env.STORAGE_SIGNING_SECRET;
+
+    expect(fatalSettings(env)).not.toContain("STORAGE_SIGNING_SECRET");
+  });
+
   it("still rejects a misspelled storage provider", () => {
     // Adding 'supabase' to the known list must not widen what counts as valid.
     expect(
@@ -169,10 +185,21 @@ describe("production configuration", () => {
     ).toContain("STORAGE_PROVIDER");
   });
 
-  it("rejects a missing storage signing secret", () => {
-    // Unset, every instance signs with its own random key: signed KYC links
-    // minted by one instance are rejected by the next.
-    const env = { ...productionBase };
+  it("rejects a missing storage signing secret when storage is LOCAL", () => {
+    /*
+     * Unset, every instance signs with its own random key: signed KYC links
+     * minted by one instance are rejected by the next.
+     *
+     * Scoped to local storage. This test used to inherit productionBase's
+     * `firebase` provider and still expect the fatal, which encoded the old
+     * unconditional check — a check that became a false alarm once a backend
+     * that signs its own URLs existed. The negative case is covered separately
+     * below; keeping both is what stops the scoping from silently widening.
+     */
+    const env: NodeJS.ProcessEnv = {
+      ...productionBase,
+      STORAGE_PROVIDER: "local",
+    };
     delete env.STORAGE_SIGNING_SECRET;
     expect(fatalSettings(env)).toContain("STORAGE_SIGNING_SECRET");
   });
