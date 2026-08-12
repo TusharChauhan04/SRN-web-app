@@ -50,13 +50,27 @@ export function BidForm({
                 : "The total you'd charge for this work."
           }
         >
+          {/*
+            `min` MUST stay aligned to `step`, and it was not.
+
+            HTML anchors the step grid to `min`, so min={1} with step={100} made
+            the only valid amounts 1, 101, 201 … — every round figure a provider
+            would actually type was rejected by the browser, with "the two
+            nearest valid values are 74901 and 75001". Submitting a quote is the
+            core action of this marketplace and it was impossible.
+
+            Every other money input already got this right by using min={0}
+            (profile hourly rate, both requirement budgets). Here the minimum
+            must be positive — a ₹0 quote is meaningless — so it is the step
+            itself, which keeps the grid aligned AND the value positive.
+          */}
           <Input
             id="amount"
             name="amount"
             type="number"
             inputMode="numeric"
             required
-            min={1}
+            min={100}
             step={100}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
