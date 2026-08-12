@@ -8,15 +8,29 @@ Ordered by what blocks what.
 
 ---
 
-## 1. Hosting and the database — blocks everything else
+## 1. Hosting and the database — ✅ DONE
 
-**This is the only item that blocks a real deployment.**
+**Supabase Postgres, migrated and verified 8 Aug 2026.** This was the item that
+blocked everything; it no longer does.
 
-The app currently runs on SQLite, which is a placeholder. `pnpm preflight` and
-`/api/healthz` both refuse to call a SQLite-backed production deployment
-healthy, because the failure is silent: serverless filesystems are ephemeral
-and per-instance, so rows vanish on cold start and are not shared between
-instances. Nothing errors — you would simply lose data.
+What was done: datasource swapped, migration history regenerated for Postgres,
+all 10 unique constraints confirmed present in the live database, the rate
+limiter's raw SQL rewritten (it bound datetimes as integers, which Postgres
+rejects), and 12 search clauses made case-insensitive (Postgres `LIKE` is
+case-sensitive where SQLite's was not — without this a provider who listed
+"React" was unfindable by every query, silently).
+
+Verified end to end: 73 tests against Supabase, and `scripts/smoke.ps1` diffed
+against a pre-migration baseline — all 39 route checks identical.
+
+**Supabase is a waypoint.** The intent is Azure later. That is a connection
+string *if* the target is Azure Database for PostgreSQL, and a rewrite
+otherwise — see DATABASE.md for what each option costs.
+
+**What you still need to set** in the hosting platform: `DATABASE_URL` (pooled,
+`:6543`, with `?pgbouncer=true&connection_limit=1`), `DIRECT_URL` (`:5432`), and
+`NEXT_PUBLIC_APP_URL` — that last one backs the CSRF origin check, and a wrong
+value 403s every mutation while preflight still reports it fine.
 
 Two viable paths:
 

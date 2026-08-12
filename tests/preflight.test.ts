@@ -19,7 +19,16 @@ const productionBase = {
   AUTH_PROVIDER: "firebase",
   PAYMENT_PROVIDER: "razorpay",
   OTP_PROVIDER: "sms",
-  STORAGE_PROVIDER: "firebase",
+  /*
+   * `supabase`, not `firebase`. This fixture used to select Firebase Storage —
+   * a stub whose four methods all throw — and the first test below asserts this
+   * environment is fully deployable. The suite was certifying a configuration
+   * that 500s on the first KYC upload as correct.
+   */
+  STORAGE_PROVIDER: "supabase",
+  SUPABASE_URL: "https://project.supabase.co",
+  SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+  SUPABASE_STORAGE_BUCKET: "uploads",
   STORAGE_SIGNING_SECRET: "a-real-secret",
   EMAIL_PROVIDER: "smtp",
 } as NodeJS.ProcessEnv;
@@ -89,12 +98,16 @@ describe("production configuration", () => {
     // Distinct from a misspelling: the value is correct, so the provider is
     // selected happily and then throws on the first upload — at which point the
     // failing thing is a user's KYC submission, not a deploy.
-    const problems = fatalSettings({
+    const env: NodeJS.ProcessEnv = {
       ...productionBase,
       STORAGE_PROVIDER: "supabase",
-      // credentials deliberately absent
-    });
-    expect(problems).toContain("STORAGE_PROVIDER");
+    };
+    // productionBase now carries them, so they have to be removed explicitly.
+    delete env.SUPABASE_URL;
+    delete env.SUPABASE_SERVICE_ROLE_KEY;
+    delete env.SUPABASE_STORAGE_BUCKET;
+
+    expect(fatalSettings(env)).toContain("STORAGE_PROVIDER");
   });
 
   it("does not demand a local signing secret when storage is supabase", () => {
@@ -111,6 +124,39 @@ describe("production configuration", () => {
     delete env.STORAGE_SIGNING_SECRET;
 
     expect(fatalSettings(env)).not.toContain("STORAGE_SIGNING_SECRET");
+  });
+
+  it("rejects firebase storage, which is still an unimplemented stub", () => {
+    // This was the DOCUMENTED production value before Supabase Storage existed,
+    // so a hosting environment may still carry it. It passed every check —
+    // recognised name, so the local check did not fire; credential check only
+    // covered supabase — and then threw on the first upload.
+    expect(
+      fatalSettings({ ...productionBase, STORAGE_PROVIDER: "firebase" }),
+    ).toContain("STORAGE_PROVIDER");
+  });
+
+  it("treats an UNSET storage provider the way the factory does", () => {
+    /*
+     * preflight and the provider factory must agree. They did not: the factory
+     * chose supabase in production for an unset value while preflight assumed
+     * local, so preflight reported "KYC documents written to an ephemeral disk"
+     * — false — and never ran the Supabase credential check for the one case
+     * where Supabase is what gets selected.
+     */
+    const env: NodeJS.ProcessEnv = { ...productionBase };
+    delete env.STORAGE_PROVIDER;
+    delete env.SUPABASE_URL;
+
+    const problems = checkConfiguration(env);
+    const message = problems.find((p) => p.setting === "STORAGE_PROVIDER")
+      ?.message;
+
+    // It must complain about the MISSING SUPABASE CREDENTIALS, not about local
+    // disk — the latter would be describing a provider that is not selected.
+    expect(message).toBeDefined();
+    expect(message).toContain("SUPABASE_URL");
+    expect(message).not.toContain("ephemeral");
   });
 
   it("still rejects a misspelled storage provider", () => {

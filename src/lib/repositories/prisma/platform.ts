@@ -489,18 +489,29 @@ export class PrismaRateLimitRepository implements RateLimitRepository {
      * (Bound datetimes were also what broke on the SQLite→Postgres move: the
      * old query passed unix-ms integers into a timestamp(3) column, which
      * Postgres rejects with 42804. Using now() removes the binding entirely.)
+     *
+     * `AT TIME ZONE 'UTC'` is NOT decoration. `now()` is timestamptz; the column
+     * is timestamp(3) WITHOUT time zone, so a bare now() is implicitly cast
+     * using the session TimeZone. Throttling still works — both sides of the
+     * comparison take the same cast — but the expiry handed back to the caller
+     * is skewed by the server's UTC offset, and gateway/core.ts turns it into a
+     * Retry-After header. On a server set to Asia/Kolkata a 60-second window
+     * returns `Retry-After: 19800`: a five-and-a-half-hour lockout that a
+     * well-behaved client obeys. Supabase and the CI container both default to
+     * UTC, so nothing here would ever have caught it; Azure exposes `timezone`
+     * as a settable server parameter, which is where it would have appeared.
      */
     const rows = await prisma.$queryRaw<{ count: number; expiresAt: Date }[]>`
       INSERT INTO "RateLimit" ("key", "count", "expiresAt")
-      VALUES (${key}, 1, now() + make_interval(secs => ${windowSeconds}::float8))
+      VALUES (${key}, 1, (now() AT TIME ZONE 'UTC') + make_interval(secs => ${windowSeconds}::float8))
       ON CONFLICT("key") DO UPDATE SET
         "count" = CASE
-          WHEN "RateLimit"."expiresAt" <= now() THEN 1
+          WHEN "RateLimit"."expiresAt" <= (now() AT TIME ZONE 'UTC') THEN 1
           ELSE "RateLimit"."count" + 1
         END,
         "expiresAt" = CASE
-          WHEN "RateLimit"."expiresAt" <= now()
-            THEN now() + make_interval(secs => ${windowSeconds}::float8)
+          WHEN "RateLimit"."expiresAt" <= (now() AT TIME ZONE 'UTC')
+            THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => ${windowSeconds}::float8)
           -- PRESERVED, not extended. A sliding window here would let a client
           -- that retries on 429 push its own unlock further away with every
           -- attempt — which is exactly what Retry-After encourages it to do —

@@ -153,19 +153,77 @@ export function checkConfiguration(
    * fail closed; they just say so differently. What matters is that neither
    * path can quietly end up on local disk.
    */
+  /*
+   * Resolve EXACTLY as src/lib/providers/storage/index.server.ts does.
+   *
+   * These two used to disagree about an unset or unknown value: the factory
+   * chose "supabase" in production while this file assumed "local". So with
+   * STORAGE_PROVIDER unset, preflight reported "Local file storage in
+   * production — KYC identity documents written to an ephemeral disk", which
+   * was simply false, and sent anyone debugging it in the wrong direction. It
+   * also meant the Supabase credential check below never ran for the one case
+   * where Supabase is what actually gets selected.
+   */
   const storage = (env.STORAGE_PROVIDER ?? "").toLowerCase();
-  const KNOWN_STORAGE = ["local", "firebase", "supabase"];
-  const resolvedStorage = KNOWN_STORAGE.includes(storage) ? storage : "local";
+  const recognised =
+    storage === "supabase" || storage === "firebase" || storage === "local";
+  const resolvedStorage = recognised
+    ? storage
+    : isProduction
+      ? "supabase"
+      : "local";
+
+  /*
+   * A misspelling is its own fatal, checked BEFORE resolution and independently
+   * of it.
+   *
+   * Folding this into the resolution is a trap I walked into: once an unknown
+   * value resolves to "supabase", a typo like `supabse` in an environment that
+   * happens to hold valid Supabase credentials produces no complaint at all —
+   * quieter than the behaviour it replaced. The operator asked for something
+   * that does not exist, and that is worth saying out loud regardless of what
+   * the fallback happens to pick.
+   */
+  if (isProduction && storage && !recognised) {
+    problems.push({
+      severity: "fatal",
+      setting: "STORAGE_PROVIDER",
+      message:
+        `Unrecognised value "${env.STORAGE_PROVIDER}" — supported values are ` +
+        "'local', 'supabase' and 'firebase'. Check the spelling.",
+    });
+  }
+
+  /*
+   * Firebase Storage is FATAL while it remains a stub.
+   *
+   * Every one of its four methods throws `storage/not-implemented`. It used to
+   * pass every check here — it is a recognised name, so the local check did not
+   * fire, and the credential check only covered supabase — so a deploy carrying
+   * the previously-documented STORAGE_PROVIDER=firebase went green and then 500d
+   * on the first KYC upload and on every avatar read.
+   */
+  if (isProduction && resolvedStorage === "firebase") {
+    problems.push({
+      severity: "fatal",
+      setting: "STORAGE_PROVIDER",
+      message:
+        "FirebaseStorageProvider is not implemented — every method throws. " +
+        "This was the documented production value before Supabase Storage " +
+        "existed, so it may be left over in your hosting environment. Set " +
+        "STORAGE_PROVIDER=supabase.",
+    });
+  }
+  // Only reachable now by asking for `local` explicitly — an unrecognised value
+  // is caught above and no longer resolves here, so this message can say the
+  // one thing it means.
   if (isProduction && resolvedStorage === "local") {
     problems.push({
       severity: "fatal",
       setting: "STORAGE_PROVIDER",
       message:
-        storage && storage !== "local"
-          ? `Unrecognised value "${env.STORAGE_PROVIDER}" — supported values ` +
-            "are 'local', 'supabase' and 'firebase'. Check the spelling."
-          : "Local file storage in production. Uploads — including KYC identity " +
-            "documents — are written to an ephemeral per-instance disk and lost.",
+        "Local file storage in production. Uploads — including KYC identity " +
+        "documents — are written to an ephemeral per-instance disk and lost.",
     });
   }
 

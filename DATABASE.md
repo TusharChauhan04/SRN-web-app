@@ -212,15 +212,25 @@ Again: no page, component, or Route Handler changes.
 ## 4. Everyday commands
 
 ```bash
-pnpm db:migrate      # create + apply a migration after editing schema.prisma
 pnpm db:generate     # regenerate the Prisma client
-pnpm db:seed         # wipe and re-seed (destructive)
-pnpm db:reset        # drop, re-migrate, re-seed
-pnpm db:deploy       # apply existing migrations (use in CI/production)
+pnpm db:deploy       # apply existing migrations — the one to use day to day
+pnpm db:migrate      # create a migration. INTERACTIVE: fails in a non-interactive shell
+pnpm db:seed         # wipe and re-seed. Refuses without SEED_ALLOW_DESTRUCTIVE=1
+pnpm db:reset        # DROPS THE SCHEMA at DATABASE_URL, then re-migrates
 ```
 
-After **any** schema change: run `pnpm db:migrate`, then `pnpm typecheck`, then
-`pnpm db:seed`.
+⚠️ **`db:reset` changed meaning with Postgres.** Under SQLite it deleted a
+scratch file; now it runs `DROP SCHEMA ... CASCADE` against whatever
+`DATABASE_URL` resolves to. `--force` was removed so Prisma prompts first — do
+not add it back to make CI quieter, because there is no longer any URL that is
+obviously safe to point it at.
+
+The same reasoning applies to `db:seed`: it used to allow any `file:` URL
+through on the grounds that a local SQLite file is disposable, and nothing is
+disposable now. Development, staging and production are the same shape of URL.
+
+After **any** schema change: `pnpm db:migrate`, then `pnpm typecheck`, then
+`pnpm test`.
 
 > **`typecheck` now catches mapper drift.** `mappers.ts` types each row against
 > the generated Prisma model, with `include`d relations declared explicitly, so
@@ -240,21 +250,26 @@ After **any** schema change: run `pnpm db:migrate`, then `pnpm typecheck`, then
 
 Recorded so they are decisions, not surprises.
 
-**SQLite does not work on serverless hosting.** Vercel's filesystem is
-ephemeral and read-only at runtime; a SQLite file written there is lost on
-every cold start and not shared between instances. Before the first real
-deployment, either:
-- move the placeholder to a small hosted Postgres (Neon / Supabase / Vercel
-  Postgres) — this is just Case A above and can happen *before* the real
-  database decision lands, or
-- deploy somewhere with a persistent disk (Railway, Fly, a VM).
+**Connection pooling is not optional on serverless.** Each Vercel invocation is
+its own process, so a default Prisma pool per invocation multiplies out and
+exhausts the pooler. The app uses the transaction pooler (`:6543`) with
+`?pgbouncer=true&connection_limit=1`; `prisma migrate` uses the session pooler
+(`:5432`) via `directUrl`, because it takes advisory locks and runs DDL across a
+session that transaction pooling breaks. Dropping `pgbouncer=true` fails only
+under concurrency — never in single-user testing.
 
-This is the single biggest thing riding on the placeholder.
+Chat polls every 5 seconds per open tab, which is the load shape that finds a
+misconfigured pool first.
 
 **Rate limiting is database-backed.** `RateLimitRepository` writes to the same
-store. That's fine for a single instance but is not a substitute for an
-edge/Redis limiter under real traffic, and it puts write load on the database
-on every request. Revisit when the real database is chosen.
+store. This was flagged under SQLite because one writer at a time made it a
+bottleneck; Postgres resolves that for launch scale, so **no Redis is needed
+yet**. It still puts a write on every request, so revisit under real traffic.
+
+The limiter takes its time from the database (`now()`), not the application
+clock — deliberately. An instance whose clock ran slow by more than one window
+would otherwise write an already-expired expiry, reset the counter on every
+request, and disable throttling for every key it touched, silently.
 
 **Fraud detection is heuristic, not signal-based.**
 `UserRepository.findSuspiciousAccounts` looks for new accounts with improbable

@@ -23,11 +23,29 @@ import { storageProvider } from "@/lib/providers/storage/index.server";
  * latter to "local" so no ordinary test can reach a live bucket, and reading it
  * here made this file skip itself while the suite still reported success.
  */
+/*
+ * OPT-IN, not merely "configured".
+ *
+ * This file WRITES to whatever bucket is configured. tests/global-setup.ts
+ * refuses `?schema=public` precisely because a URL cannot tell development from
+ * production — and the same is true of a bucket name. Without an explicit
+ * opt-in, running `pnpm test` with a production .env loaded would drop a
+ * selftest object into the bucket holding real KYC documents, and a failed
+ * cleanup would leave it there quietly.
+ *
+ * So the bucket has to be named a second time, in a variable that exists for no
+ * other purpose. Set STORAGE_TEST_BUCKET to the same value as
+ * SUPABASE_STORAGE_BUCKET to run these; leave it unset and they skip.
+ */
+const OPTED_IN =
+  Boolean(process.env.STORAGE_TEST_BUCKET) &&
+  process.env.STORAGE_TEST_BUCKET === process.env.SUPABASE_STORAGE_BUCKET;
+
 const CONFIGURED =
+  OPTED_IN &&
   process.env.__REAL_STORAGE_PROVIDER === "supabase" &&
   Boolean(process.env.SUPABASE_URL) &&
-  Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
-  Boolean(process.env.SUPABASE_STORAGE_BUCKET);
+  Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Restore the real selection for THIS file only. Safe because the provider is
 // constructed lazily on first use and vitest isolates modules per test file, so
