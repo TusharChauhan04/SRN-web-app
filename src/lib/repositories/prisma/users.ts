@@ -360,6 +360,27 @@ export class PrismaUserRepository implements UserRepository {
    * the Firebase Auth user is deleted — neither of which this repository can
    * do, because both live outside the database. The GDPR handler must do both.
    */
+  async findDueForDeletion(
+    requestedBefore: Date,
+    actor: Actor,
+    limit = 50,
+  ): Promise<User[]> {
+    // Admin-or-system only: this is the list of accounts about to be destroyed.
+    assertAdmin(actor, "findDueForDeletion");
+
+    const rows = await prisma.user.findMany({
+      where: {
+        deletionRequestedAt: { not: null, lte: requestedBefore },
+        // Already-anonymised accounts keep their row for referential integrity
+        // and would otherwise be re-erased on every run.
+        email: { not: { endsWith: "@invalid.local" } },
+      },
+      orderBy: { deletionRequestedAt: "asc" },
+      take: limit,
+    });
+    return rows.map(toUser);
+  }
+
   async listStorageKeys(id: string, actor: Actor): Promise<string[]> {
     assertSelfOrAdmin(actor, id, "listStorageKeys");
     const [uploads, verifications] = await Promise.all([

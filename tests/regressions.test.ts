@@ -5,6 +5,7 @@ import { SYSTEM_ACTOR } from "@/lib/repositories/authorize";
 import type { User } from "@/lib/repositories/types";
 import { applyVerifiedPayment } from "@/lib/services/subscriptions.service";
 import { applyReferralCode } from "@/lib/services/referrals.service";
+import { runDueErasures, DELETION_GRACE_DAYS } from "@/lib/services/gdpr.service";
 import { TIER_PRICES_MINOR } from "@/lib/providers/payments/index.server";
 
 /**
@@ -798,5 +799,83 @@ describe("case-insensitive search (Postgres LIKE is case-sensitive)", () => {
 
     const byLocation = await repo.users.searchProviders({ location: "mumbai" });
     expect(byLocation.items.map((u) => u.id)).toContain("cased-text");
+  });
+});
+
+/*
+ * Scheduled erasure. `performErasure` had ZERO callers before this: the app
+ * recorded a deletion request, showed the user the date it would take effect,
+ * and then kept everything indefinitely. No error, no alert, just a queue.
+ *
+ * These test the grace period boundary specifically, because that is the part
+ * where being wrong is irreversible in one direction and a legal exposure in
+ * the other.
+ */
+describe("scheduled GDPR erasure", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("does NOT erase an account still inside the grace period", async () => {
+    const user = await makeUser("grace-inside");
+    await repo.users.markForDeletion(user.id, new Date(), user);
+
+    const result = await runDueErasures(50);
+    expect(result.erased).toBe(0);
+
+    // Still intact, still identifiable.
+    const after = await repo.users.findById(user.id);
+    expect(after?.email).toBe("grace-inside@test.local");
+  });
+
+  it("erases an account whose grace period has expired", async () => {
+    const user = await makeUser("grace-expired");
+    const longAgo = new Date(Date.now() - (DELETION_GRACE_DAYS + 1) * DAY);
+    await repo.users.markForDeletion(user.id, longAgo, user);
+
+    const result = await runDueErasures(50);
+    expect(result.erased).toBe(1);
+    expect(result.failed).toHaveLength(0);
+
+    // Anonymised, not deleted — the row survives so bookings and reviews keep
+    // their referential integrity.
+    const after = await repo.users.findById(user.id);
+    expect(after).not.toBeNull();
+    expect(after?.email).toMatch(/@invalid\.local$/);
+  });
+
+  it("does not re-erase an account that was already anonymised", async () => {
+    // Anonymised rows keep deletionRequestedAt, so without the email filter in
+    // findDueForDeletion they would be picked up on every single run forever.
+    const user = await makeUser("grace-twice");
+    await repo.users.markForDeletion(
+      user.id,
+      new Date(Date.now() - (DELETION_GRACE_DAYS + 1) * DAY),
+      user,
+    );
+
+    expect((await runDueErasures(50)).erased).toBe(1);
+    expect((await runDueErasures(50)).erased).toBe(0);
+  });
+
+  it("bounds a single run", async () => {
+    const longAgo = new Date(Date.now() - (DELETION_GRACE_DAYS + 1) * DAY);
+    for (const id of ["bulk-a", "bulk-b", "bulk-c"]) {
+      const u = await makeUser(id);
+      await repo.users.markForDeletion(u.id, longAgo, u);
+    }
+
+    // The limit is what stops a job that woke up with a wrong cutoff from
+    // destroying every account before anyone notices.
+    const result = await runDueErasures(2);
+    expect(result.considered).toBe(2);
+    expect(result.erased).toBe(2);
+  });
+
+  it("refuses to list due accounts for a non-admin", async () => {
+    // The due list is "accounts about to be destroyed". A signed-in customer
+    // must not be able to read it.
+    const outsider = await makeUser("nosy", "customer");
+    await expect(
+      repo.users.findDueForDeletion(new Date(), outsider),
+    ).rejects.toThrow();
   });
 });

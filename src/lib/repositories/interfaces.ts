@@ -127,6 +127,22 @@ export interface UserRepository {
   anonymize(id: string, actor: Actor): Promise<void>;
   /** Storage keys to delete from object storage before `anonymize`. */
   listStorageKeys(id: string, actor: Actor): Promise<string[]>;
+  /**
+   * Accounts whose deletion request is older than `requestedBefore`.
+   *
+   * Deliberately takes a CUTOFF rather than a grace period: how long the grace
+   * period is, is a business rule and belongs in the service. This method only
+   * answers "who asked before this moment", which is a query.
+   *
+   * `limit` bounds a single run. Erasure is irreversible, so a scheduled job
+   * that woke up to a bad cutoff should be able to destroy at most a bounded
+   * number of accounts before anyone notices.
+   */
+  findDueForDeletion(
+    requestedBefore: Date,
+    actor: Actor,
+    limit?: number,
+  ): Promise<User[]>;
   /** Every row belonging to this user, for the GDPR export bundle. */
   exportAll(id: string, actor: Actor): Promise<Record<string, unknown>>;
 
