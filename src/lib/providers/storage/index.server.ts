@@ -127,7 +127,7 @@ class LocalStorageProvider implements StorageProvider {
     if (process.env.NODE_ENV === "production") {
       throw new StorageError(
         "Local disk storage cannot be used in production — uploads would not " +
-          "survive a deploy. Set STORAGE_PROVIDER=firebase and configure a bucket.",
+          "survive a deploy. Set STORAGE_PROVIDER=supabase and configure the buckets.",
         "storage/not-production-safe",
       );
     }
@@ -266,23 +266,78 @@ class SupabaseStorageProvider implements StorageProvider {
     return Boolean(
       process.env.SUPABASE_URL &&
         process.env.SUPABASE_SERVICE_ROLE_KEY &&
-        process.env.SUPABASE_STORAGE_BUCKET,
+        process.env.SUPABASE_STORAGE_BUCKET &&
+        process.env.SUPABASE_STORAGE_BUCKET_PUBLIC,
     );
   }
 
-  private config(): { url: string; key: string; bucket: string } {
+  /**
+   * TWO buckets, and one will not do.
+   *
+   * A single bucket has no correct setting. Private, and `/object/public/...`
+   * returns 400 — every avatar and portfolio image in the app breaks, and
+   * `confirmUpload` persists the dead URL into `User.avatarUrl`, so it does not
+   * heal itself. Public, and every KYC identity document is readable by anyone
+   * holding the key; the signing on the document branch then only protects
+   * against guessing, and LOCAL_ROOT's comment above lists exactly how keys
+   * travel — admin browser history, Referer headers, proxy logs, and the GDPR
+   * export bundle, which returns Upload rows verbatim.
+   *
+   * So: `document` and `evidence` live in the PRIVATE bucket and are always
+   * signed. `avatar` and `portfolio` live in the PUBLIC one and are genuinely
+   * public, which is what they are meant to be.
+   */
+  private config(): {
+    url: string;
+    key: string;
+    privateBucket: string;
+    publicBucket: string;
+  } {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const bucket = process.env.SUPABASE_STORAGE_BUCKET;
+    const privateBucket = process.env.SUPABASE_STORAGE_BUCKET;
+    const publicBucket = process.env.SUPABASE_STORAGE_BUCKET_PUBLIC;
 
-    if (!url || !key || !bucket) {
+    if (!url || !key || !privateBucket || !publicBucket) {
       throw new StorageError(
         "Supabase Storage is not configured. Set SUPABASE_URL, " +
-          "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET.",
+          "SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET (private) and " +
+          "SUPABASE_STORAGE_BUCKET_PUBLIC.",
         "storage/not-configured",
       );
     }
-    return { url: url.replace(/\/+$/, ""), key, bucket };
+    return { url: url.replace(/\/+$/, ""), key, privateBucket, publicBucket };
+  }
+
+  /** Public contexts. Everything else is treated as private. */
+  private static readonly PUBLIC_CONTEXTS: ReadonlySet<string> = new Set([
+    "avatar",
+    "portfolio",
+  ]);
+
+  private bucketForContext(context: UploadContext): string {
+    const { privateBucket, publicBucket } = this.config();
+    return SupabaseStorageProvider.PUBLIC_CONTEXTS.has(context)
+      ? publicBucket
+      : privateBucket;
+  }
+
+  /**
+   * `exists` and `delete` receive only a key — the interface has no context —
+   * so the bucket is derived from the key's first segment. Keys are built as
+   * `${context}/${userId}/${uuid}.${ext}` in provider.service.ts, so that
+   * segment IS the context.
+   *
+   * Anything unrecognised resolves to the PRIVATE bucket deliberately. Guessing
+   * "public" for an unknown key would, at worst, expose something; guessing
+   * "private" merely fails to find it.
+   */
+  private bucketForKey(storageKey: string): string {
+    const { privateBucket, publicBucket } = this.config();
+    const prefix = storageKey.split("/")[0] ?? "";
+    return SupabaseStorageProvider.PUBLIC_CONTEXTS.has(prefix)
+      ? publicBucket
+      : privateBucket;
   }
 
   private async call(
@@ -314,7 +369,8 @@ class SupabaseStorageProvider implements StorageProvider {
     mimeType: string;
     context: UploadContext;
   }): Promise<UploadTarget> {
-    const { url, bucket } = this.config();
+    const { url } = this.config();
+    const bucket = this.bucketForContext(input.context);
     const res = await this.call(
       "POST",
       `object/upload/sign/${bucket}/${input.storageKey}`,
@@ -350,7 +406,8 @@ class SupabaseStorageProvider implements StorageProvider {
     storageKey: string,
     context: UploadContext,
   ): Promise<string> {
-    const { url, bucket } = this.config();
+    const { url } = this.config();
+    const bucket = this.bucketForContext(context);
 
     if (context === "document" || context === "evidence") {
       const res = await this.call("POST", `object/sign/${bucket}/${storageKey}`, {
@@ -370,7 +427,7 @@ class SupabaseStorageProvider implements StorageProvider {
   }
 
   async exists(storageKey: string): Promise<boolean> {
-    const { bucket } = this.config();
+    const bucket = this.bucketForKey(storageKey);
     const res = await this.call("HEAD", `object/${bucket}/${storageKey}`);
     if (res.ok) return true;
 
@@ -391,7 +448,7 @@ class SupabaseStorageProvider implements StorageProvider {
   }
 
   async delete(storageKey: string): Promise<void> {
-    const { bucket } = this.config();
+    const bucket = this.bucketForKey(storageKey);
     const res = await this.call("DELETE", `object/${bucket}/${storageKey}`);
     if (res.ok) return;
 

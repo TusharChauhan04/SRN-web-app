@@ -142,18 +142,6 @@ export function checkConfiguration(
   }
 
   /*
-   * Check the RESOLVED provider, not the raw string.
-   *
-   * This used to compare `env.STORAGE_PROVIDER ?? "local"` against "local",
-   * which passed for any unrecognised value — so `STORAGE_PROVIDER=firebse`
-   * reported "configuration looks deployable" while the app ran on local disk.
-   * Note this deliberately does NOT mirror the factory exactly: for an unknown
-   * value the factory resolves to "firebase" (so it fails loudly on a missing
-   * bucket), while preflight treats unknown as unusable and reports it. Both
-   * fail closed; they just say so differently. What matters is that neither
-   * path can quietly end up on local disk.
-   */
-  /*
    * Resolve EXACTLY as src/lib/providers/storage/index.server.ts does.
    *
    * These two used to disagree about an unset or unknown value: the factory
@@ -233,10 +221,13 @@ export function checkConfiguration(
    * then throws on the first upload rather than at deploy time.
    */
   if (isProduction && resolvedStorage === "supabase") {
+    // BOTH buckets. A single bucket has no correct setting: private breaks
+    // every avatar, public exposes every KYC document. See the provider.
     const missing = [
       "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
       "SUPABASE_STORAGE_BUCKET",
+      "SUPABASE_STORAGE_BUCKET_PUBLIC",
     ].filter((k) => !env[k]);
 
     if (missing.length > 0) {

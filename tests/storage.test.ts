@@ -45,7 +45,9 @@ const CONFIGURED =
   OPTED_IN &&
   process.env.__REAL_STORAGE_PROVIDER === "supabase" &&
   Boolean(process.env.SUPABASE_URL) &&
-  Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+  // Both buckets — the provider refuses to construct without them.
+  Boolean(process.env.SUPABASE_STORAGE_BUCKET_PUBLIC);
 
 // Restore the real selection for THIS file only. Safe because the provider is
 // constructed lazily on first use and vitest isolates modules per test file, so

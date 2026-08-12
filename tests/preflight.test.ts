@@ -29,6 +29,7 @@ const productionBase = {
   SUPABASE_URL: "https://project.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
   SUPABASE_STORAGE_BUCKET: "uploads",
+  SUPABASE_STORAGE_BUCKET_PUBLIC: "uploads-public",
   STORAGE_SIGNING_SECRET: "a-real-secret",
   EMAIL_PROVIDER: "smtp",
 } as NodeJS.ProcessEnv;
@@ -106,6 +107,7 @@ describe("production configuration", () => {
     delete env.SUPABASE_URL;
     delete env.SUPABASE_SERVICE_ROLE_KEY;
     delete env.SUPABASE_STORAGE_BUCKET;
+    delete env.SUPABASE_STORAGE_BUCKET_PUBLIC;
 
     expect(fatalSettings(env)).toContain("STORAGE_PROVIDER");
   });
@@ -120,6 +122,7 @@ describe("production configuration", () => {
       SUPABASE_URL: "https://project.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
       SUPABASE_STORAGE_BUCKET: "uploads",
+      SUPABASE_STORAGE_BUCKET_PUBLIC: "uploads-public",
     };
     delete env.STORAGE_SIGNING_SECRET;
 
@@ -157,6 +160,18 @@ describe("production configuration", () => {
     expect(message).toBeDefined();
     expect(message).toContain("SUPABASE_URL");
     expect(message).not.toContain("ephemeral");
+  });
+
+  it("rejects supabase storage with only ONE bucket configured", () => {
+    /*
+     * A single bucket has no correct setting. Private, and every avatar and
+     * portfolio image 400s — and confirmUpload persists the dead URL, so it
+     * does not heal. Public, and every KYC identity document is readable by
+     * anyone holding the key. Both buckets or neither.
+     */
+    const env: NodeJS.ProcessEnv = { ...productionBase };
+    delete env.SUPABASE_STORAGE_BUCKET_PUBLIC;
+    expect(fatalSettings(env)).toContain("STORAGE_PROVIDER");
   });
 
   it("still rejects a misspelled storage provider", () => {
