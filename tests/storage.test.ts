@@ -123,6 +123,94 @@ describe.skipIf(!CONFIGURED)("supabase storage round trip", () => {
     expect(await provider.exists(storageKey)).toBe(false);
   });
 
+  it("serves an avatar publicly, from the public bucket", async () => {
+    /*
+     * The other half of the split, and the half that had no coverage.
+     *
+     * A single bucket has no correct setting: private and this test fails
+     * (every avatar 400s, and confirmUpload persists the dead URL so it never
+     * heals); public and the document test above fails (KYC identity documents
+     * readable by anyone holding the key). The two tests can only pass together
+     * when the buckets are actually separate, which is the property worth
+     * pinning down.
+     */
+    const provider = storageProvider();
+    const storageKey = `avatar/storage-selftest/${randomUUID()}.txt`;
+    const payload = `avatar selftest ${Date.now()}`;
+    let uploaded = false;
+
+    try {
+      const target = await provider.createUploadTarget({
+        storageKey,
+        mimeType: "text/plain",
+        context: "avatar",
+      });
+
+      const put = await fetch(target.uploadUrl, {
+        method: "PUT",
+        headers: target.headers,
+        body: payload,
+      });
+      expect(
+        put.ok,
+        `upload failed: ${put.status} ${await put.text().catch(() => "")}`,
+      ).toBe(true);
+      uploaded = true;
+
+      // Derived from the key prefix, with no context argument — this is the
+      // path exists()/delete() take, so it proves that derivation works.
+      expect(await provider.exists(storageKey)).toBe(true);
+
+      const readUrl = await provider.getReadUrl(storageKey, "avatar");
+      expect(readUrl).toContain("/object/public/");
+      expect(readUrl).toContain(process.env.SUPABASE_STORAGE_BUCKET_PUBLIC!);
+      // No signature: avatars are rendered in long-lived pages, and a 15-minute
+      // token would break them on screen.
+      expect(readUrl).not.toContain("token=");
+
+      // UNAUTHENTICATED fetch must succeed — the inverse of the document case.
+      const anon = await fetch(readUrl);
+      expect(
+        anon.ok,
+        `public read failed (${anon.status}) — is ${process.env.SUPABASE_STORAGE_BUCKET_PUBLIC} marked public?`,
+      ).toBe(true);
+      expect(await anon.text()).toBe(payload);
+    } finally {
+      if (uploaded) await provider.delete(storageKey).catch(() => {});
+    }
+
+    expect(await provider.exists(storageKey)).toBe(false);
+  });
+
+  it("routes each context to its own bucket at upload time", async () => {
+    /*
+     * Checked on the UPLOAD target, not a read URL. Signing a read requires the
+     * object to already exist — my first version asserted against a key that did
+     * not, and Supabase answered 400. The upload target is where the routing
+     * decision is actually made, so it is the honest place to assert it, and it
+     * needs no fixture.
+     */
+    const provider = storageProvider();
+    const priv = process.env.SUPABASE_STORAGE_BUCKET!;
+    const pub = process.env.SUPABASE_STORAGE_BUCKET_PUBLIC!;
+    expect(priv).not.toBe(pub);
+
+    const doc = await provider.createUploadTarget({
+      storageKey: `document/x/${randomUUID()}.pdf`,
+      mimeType: "application/pdf",
+      context: "document",
+    });
+    expect(doc.uploadUrl).toContain(priv);
+    expect(doc.uploadUrl).not.toContain(pub);
+
+    const avatar = await provider.createUploadTarget({
+      storageKey: `avatar/x/${randomUUID()}.png`,
+      mimeType: "image/png",
+      context: "avatar",
+    });
+    expect(avatar.uploadUrl).toContain(pub);
+  });
+
   it("treats deleting an absent object as success", async () => {
     // Already gone IS the desired end state. Anything else must throw — a
     // blanket catch here is what made the GDPR erasure guard unreachable for
