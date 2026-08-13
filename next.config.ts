@@ -73,6 +73,27 @@ const nextConfig: NextConfig = {
    */
   serverExternalPackages: ["@prisma/client"],
 
+  /**
+   * Force `firebase-admin` to be BUNDLED rather than left external.
+   *
+   * Next ships a default opt-out list (`next/dist/lib/server-external-packages.jsonc`)
+   * and `firebase-admin` is on it. `serverExternalPackages` only ADDS to that
+   * list, so removing our entry did nothing — the package stayed external and
+   * Vercel returned 500 on every route that imports it:
+   *
+   *   Error: Failed to load external module firebase-admin-<hash>/auth
+   *
+   * It reproduced nowhere locally because this machine runs Node 24, which can
+   * `require()` an ES module; Vercel's runtime could not.
+   *
+   * `transpilePackages` is the documented lever: Next computes its opt-out set
+   * as `defaults + serverExternalPackages - transpilePackages`, so naming the
+   * package here removes it from the defaults and it gets bundled. The build
+   * only rejects a package listed in transpilePackages AND our own
+   * serverExternalPackages — the default list does not conflict.
+   */
+  transpilePackages: ["firebase-admin"],
+
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
