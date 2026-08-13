@@ -18,16 +18,65 @@ const RAZORPAY_ORIGINS = [
   "https://lumberjack.razorpay.com",
 ];
 
+/**
+ * Firebase Authentication origins.
+ *
+ * This policy was written around Razorpay and silently blocked sign-in. Google
+ * sign-in is not one request: the SDK loads a helper script from
+ * apis.google.com, frames the project's auth handler, and exchanges tokens with
+ * the Identity Toolkit. The browser reported it as
+ *
+ *   Firebase: Error (auth/internal-error)
+ *
+ * which names nothing — the real cause was only visible in the console as a CSP
+ * violation on apis.google.com.
+ *
+ * `connect-src` matters most and is the least obvious: EVERY auth method talks
+ * to identitytoolkit, so omitting it breaks password sign-in and the
+ * email-verification link too, not just the Google button. Both were reported
+ * as separate bugs; they were this one.
+ *
+ * The auth domain is read from the same public variable the client SDK uses, so
+ * the policy follows the Firebase project rather than hard-coding it. It is set
+ * at build time on Vercel; the wildcard is a fallback for a build without it,
+ * because a missing origin here fails closed and locks everyone out.
+ */
+const FIREBASE_AUTH_DOMAIN = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
+const FIREBASE_AUTH_HANDLER = FIREBASE_AUTH_DOMAIN
+  ? `https://${FIREBASE_AUTH_DOMAIN}`
+  : "https://*.firebaseapp.com";
+
+/** Loads the gapi helper the popup/redirect flow is built on. */
+const GOOGLE_SCRIPT_ORIGINS = [
+  "https://apis.google.com",
+  "https://www.gstatic.com",
+];
+
+/** Token mint, refresh, and the verification-email call. */
+const FIREBASE_API_ORIGINS = [
+  "https://identitytoolkit.googleapis.com",
+  "https://securetoken.googleapis.com",
+  "https://www.googleapis.com",
+];
+
+/** The auth handler iframe and Google's account chooser. */
+const FIREBASE_FRAME_ORIGINS = [
+  FIREBASE_AUTH_HANDLER,
+  "https://accounts.google.com",
+  "https://apis.google.com",
+];
+
 const csp = [
   `default-src 'self'`,
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${RAZORPAY_ORIGINS.join(" ")}`,
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${[...RAZORPAY_ORIGINS, ...GOOGLE_SCRIPT_ORIGINS].join(" ")}`,
   `style-src 'self' 'unsafe-inline'`,
   // Avatars and portfolio images are arbitrary-origin user content.
   `img-src 'self' data: blob: https:`,
   `font-src 'self' data:`,
-  `connect-src 'self' ${RAZORPAY_ORIGINS.join(" ")}`,
-  // Checkout renders in an iframe from its own origin.
-  `frame-src 'self' ${RAZORPAY_ORIGINS.join(" ")}`,
+  `connect-src 'self' ${[...RAZORPAY_ORIGINS, ...FIREBASE_API_ORIGINS, FIREBASE_AUTH_HANDLER].join(" ")}`,
+  // Checkout renders in an iframe from its own origin; Firebase frames its
+  // auth handler and Google frames the account chooser.
+  `frame-src 'self' ${[...RAZORPAY_ORIGINS, ...FIREBASE_FRAME_ORIGINS].join(" ")}`,
   `form-action 'self'`,
   // Nothing may frame us — the header equivalent of X-Frame-Options: DENY.
   `frame-ancestors 'none'`,
