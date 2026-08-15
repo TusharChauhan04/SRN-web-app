@@ -228,6 +228,42 @@ describe("production configuration", () => {
     ).not.toContain("DATABASE_URL");
   });
 
+  /**
+   * The outage this check exists for.
+   *
+   * `connection_limit=1` is the standard serverless recommendation and it was
+   * in this repo's own docs, .env.example, schema comments and preflight
+   * message. It assumes a request queries serially; this app fans out with
+   * Promise.all (7 queries on the customer dashboard, 20 in users.exportAll).
+   * With a pool of one those queue rather than run, and production returned
+   *
+   *   Timed out fetching a new connection from the connection pool
+   *   (Current connection pool timeout: 10, connection limit: 1)  [P2024]
+   *
+   * on every dashboard load. Both directions are asserted: a check that fired
+   * on every value, or on none, would be equally useless.
+   */
+  it("warns when connection_limit is too small for the app's own fan-out", () => {
+    const warnings = checkConfiguration({
+      ...productionBase,
+      DATABASE_URL:
+        "postgresql://user:pw@host:6543/postgres?pgbouncer=true&connection_limit=1",
+    }).filter((p) => p.setting === "DATABASE_URL" && p.severity === "warning");
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/connection_limit=1 /);
+  });
+
+  it("does not warn once connection_limit clears the fan-out", () => {
+    const warnings = checkConfiguration({
+      ...productionBase,
+      DATABASE_URL:
+        "postgresql://user:pw@host:6543/postgres?pgbouncer=true&connection_limit=10",
+    }).filter((p) => p.setting === "DATABASE_URL" && p.severity === "warning");
+
+    expect(warnings).toEqual([]);
+  });
+
   it("warns, but does not fail, when DIRECT_URL is missing", () => {
     // Deliberately not fatal: the running app never uses DIRECT_URL, only
     // `prisma migrate` does. A deploy without it serves traffic correctly and

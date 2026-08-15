@@ -39,10 +39,13 @@ datasource db {
   // them anyway and fails intermittently under concurrency — the worst kind of
   // failure, because a single-user test never reproduces it.
   //
-  // `&connection_limit=1` matters on Vercel: each serverless invocation is its
-  // own process, so a default pool per invocation multiplies out and exhausts
-  // the pooler. Chat polls every 5s per open tab, which is exactly the shape of
-  // load that finds this.
+  // `&connection_limit` must be sized for this app's OWN per-request
+  // concurrency, not copied from generic serverless advice. That advice says
+  // connection_limit=1 — one process per invocation, so pools multiply out —
+  // and it assumes each request queries serially. This one does not: pages fan
+  // out with Promise.all, up to 20 queries in `users.exportAll`. With a pool of
+  // one they queue instead of running, and past ~10 round-trips the request
+  // exceeds pool_timeout and fails with P2024. Use 10; see .env.example.
   url = env("DATABASE_URL")
 
   // Supabase's SESSION-mode pooler (port 5432). Migrations only.

@@ -107,7 +107,55 @@ export function checkConfiguration(
         "Points at a transaction pooler without ?pgbouncer=true. Prisma will " +
         "emit prepared statements the pooler cannot hold, which fails " +
         "intermittently under concurrent load and not at all in testing. " +
-        "Append ?pgbouncer=true (and &connection_limit=1 on serverless).",
+        "Append ?pgbouncer=true (see connection_limit guidance below).",
+    });
+  }
+
+  /*
+   * `connection_limit` too small for the app's own concurrency.
+   *
+   * This check exists because the advice one line above USED to read
+   * "&connection_limit=1 on serverless" — the widely repeated serverless
+   * recommendation — and that advice took production down with:
+   *
+   *   Invalid `prisma.quote.count()` invocation: Timed out fetching a new
+   *   connection from the connection pool (connection limit: 1)   [P2024]
+   *
+   * The recommendation assumes each request issues its queries one after
+   * another. This app does not. `Promise.all` fan-out is deliberate and
+   * widespread — the customer dashboard issues 7 operations at once and
+   * `users.exportAll` issues 20 — and with a pool of one they do not run
+   * concurrently, they QUEUE. Past roughly ten queued round-trips the last one
+   * waits longer than `pool_timeout` (10s) and the whole page 500s.
+   *
+   * Measured on the real pooler, an empty dashboard: 4041ms average at
+   * connection_limit=1 versus 1043ms at 10, and far more erratic (2538-6412ms
+   * versus 1014-1085ms). Production has real rows, so it crosses the timeout.
+   *
+   * Warning rather than fatal: the right ceiling depends on how many instances
+   * the host runs concurrently, so refusing to boot would be overreach. But
+   * silence here is what shipped the outage.
+   */
+  const configuredLimit = (() => {
+    const m = /[?&]connection_limit=(\d+)/.exec(databaseUrl);
+    return m ? Number(m[1]) : null;
+  })();
+
+  /** The widest `Promise.all` fan-out in the codebase (users.exportAll). */
+  const MAX_CONCURRENT_QUERIES = 20;
+  const MIN_SAFE_LIMIT = 5;
+
+  if (configuredLimit !== null && configuredLimit < MIN_SAFE_LIMIT) {
+    problems.push({
+      severity: "warning",
+      setting: "DATABASE_URL",
+      message:
+        `connection_limit=${configuredLimit} is smaller than this app's own ` +
+        `per-request concurrency. Pages fan out with Promise.all — up to ` +
+        `${MAX_CONCURRENT_QUERIES} queries in one request — so a pool this ` +
+        `small serialises them until the slowest exceeds pool_timeout and the ` +
+        `request fails with P2024. Raise it to at least ${MIN_SAFE_LIMIT} ` +
+        `(10 is a good default for a transaction pooler).`,
     });
   }
 
