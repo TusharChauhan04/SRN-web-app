@@ -28,7 +28,7 @@ string *if* the target is Azure Database for PostgreSQL, and a rewrite
 otherwise — see DATABASE.md for what each option costs.
 
 **What you still need to set** in the hosting platform: `DATABASE_URL` (pooled,
-`:6543`, with `?pgbouncer=true&connection_limit=10`), `DIRECT_URL` (`:5432`), and
+`:6543`, with `?pgbouncer=true&connection_limit=3`), `DIRECT_URL` (`:5432`), and
 `NEXT_PUBLIC_APP_URL` — that last one backs the CSRF origin check, and a wrong
 value 403s every mutation while preflight still reports it fine.
 

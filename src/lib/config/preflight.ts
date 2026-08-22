@@ -129,12 +129,34 @@ export function checkConfiguration(
    * waits longer than `pool_timeout` (10s) and the whole page 500s.
    *
    * Measured on the real pooler, an empty dashboard: 4041ms average at
-   * connection_limit=1 versus 1043ms at 10, and far more erratic (2538-6412ms
-   * versus 1014-1085ms). Production has real rows, so it crosses the timeout.
+   * connection_limit=1 versus 1043ms at 10.
    *
-   * Warning rather than fatal: the right ceiling depends on how many instances
-   * the host runs concurrently, so refusing to boot would be overreach. But
-   * silence here is what shipped the outage.
+   * THEN RAISING IT TO 10 BROKE PRODUCTION THE OTHER WAY, which is why this
+   * check now has an upper bound too. The value is not "bigger is better": it
+   * is multiplied by however many instances the host runs at once, and the
+   * pooler has a finite client budget. On this database `max_connections` is
+   * 60 and Supavisor already holds ~31 of them idle, leaving ~29. Six
+   * concurrent instances at connection_limit=10 want 60, and the pooler starts
+   * refusing outright:
+   *
+   *   Invalid `prisma.booking.count()` invocation:
+   *   Can't reach database server at ...pooler.supabase.com:6543   [P1001]
+   *
+   * Measured with 6 concurrent clients running the dashboard's 7-query fan-out,
+   * repeated twice:
+   *
+   *   limit=1   6/6 ok      limit=3   6/6 ok  (both passes)
+   *   limit=2   6/6 ok      limit=5   3/6 and 5/6 ok  <- fails
+   *                         limit=10  2/6 ok           <- fails badly
+   *
+   * So the safe band is narrow and bounded at BOTH ends: too low serialises
+   * into a P2024 timeout, too high exhausts the pooler into P1001. Three is the
+   * value in use, and it still clears exportAll's 20-query fan-out (6/6 ok,
+   * median 3021ms, well inside the 10s pool_timeout).
+   *
+   * Warning rather than fatal at both ends: the ceiling depends on the host's
+   * concurrency and the database's own limits, neither of which this module can
+   * see. But silence here shipped an outage twice.
    */
   const configuredLimit = (() => {
     const m = /[?&]connection_limit=(\d+)/.exec(databaseUrl);
@@ -143,7 +165,10 @@ export function checkConfiguration(
 
   /** The widest `Promise.all` fan-out in the codebase (users.exportAll). */
   const MAX_CONCURRENT_QUERIES = 20;
-  const MIN_SAFE_LIMIT = 5;
+  /** Below this, the fan-out serialises into a pool_timeout failure. */
+  const MIN_SAFE_LIMIT = 2;
+  /** Above this, concurrent instances exhaust a small pooler's client budget. */
+  const MAX_SAFE_LIMIT = 5;
 
   if (configuredLimit !== null && configuredLimit < MIN_SAFE_LIMIT) {
     problems.push({
@@ -154,8 +179,21 @@ export function checkConfiguration(
         `per-request concurrency. Pages fan out with Promise.all — up to ` +
         `${MAX_CONCURRENT_QUERIES} queries in one request — so a pool this ` +
         `small serialises them until the slowest exceeds pool_timeout and the ` +
-        `request fails with P2024. Raise it to at least ${MIN_SAFE_LIMIT} ` +
-        `(10 is a good default for a transaction pooler).`,
+        `request fails with P2024. Use 3.`,
+    });
+  }
+
+  if (configuredLimit !== null && configuredLimit > MAX_SAFE_LIMIT) {
+    problems.push({
+      severity: "warning",
+      setting: "DATABASE_URL",
+      message:
+        `connection_limit=${configuredLimit} is multiplied by every concurrent ` +
+        `serverless instance, and the pooler has a finite client budget. At 10, ` +
+        `six concurrent instances were refused connections outright (P1001, ` +
+        `"Can't reach database server") on a database whose 60 connections are ` +
+        `already ~31 consumed by the pooler itself. Use 3, or raise the ` +
+        `pooler's pool size first.`,
     });
   }
 

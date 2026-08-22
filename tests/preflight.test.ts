@@ -254,11 +254,33 @@ describe("production configuration", () => {
     expect(warnings[0]?.message).toMatch(/connection_limit=1 /);
   });
 
-  it("does not warn once connection_limit clears the fan-out", () => {
+  /**
+   * The SECOND outage, caused by over-correcting the first.
+   *
+   * Raising the limit to 10 stopped the serialisation but multiplied out across
+   * concurrent serverless instances and exhausted the pooler's client budget —
+   * six instances at 10 want 60 connections on a database with 60 total, ~31 of
+   * which Supavisor already holds. Production then failed intermittently with
+   * P1001 "Can't reach database server" instead of P2024.
+   *
+   * So the band is bounded at both ends, and the check has to be too.
+   */
+  it("warns when connection_limit is high enough to exhaust the pooler", () => {
     const warnings = checkConfiguration({
       ...productionBase,
       DATABASE_URL:
         "postgresql://user:pw@host:6543/postgres?pgbouncer=true&connection_limit=10",
+    }).filter((p) => p.setting === "DATABASE_URL" && p.severity === "warning");
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/concurrent serverless instance/);
+  });
+
+  it("accepts the value actually in use", () => {
+    const warnings = checkConfiguration({
+      ...productionBase,
+      DATABASE_URL:
+        "postgresql://user:pw@host:6543/postgres?pgbouncer=true&connection_limit=3",
     }).filter((p) => p.setting === "DATABASE_URL" && p.severity === "warning");
 
     expect(warnings).toEqual([]);

@@ -77,7 +77,7 @@ that's the abstraction leaking — fix it there rather than at the call site.
 | Piece | Current | Why |
 |---|---|---|
 | ORM | Prisma 6 | Datasource provider is swappable by config, so Postgres/MySQL is a small change. Pinned to 6 deliberately — Prisma 7 moves the connection URL out of the schema and requires driver adapters, which adds moving parts for no benefit here. |
-| Database | Supabase Postgres | Two URLs, and which is which matters: `DATABASE_URL` is the transaction pooler (`:6543`, needs `?pgbouncer=true&connection_limit=10`), `DIRECT_URL` is the session pooler (`:5432`, migrations only). See the datasource comments in `schema.prisma`. |
+| Database | Supabase Postgres | Two URLs, and which is which matters: `DATABASE_URL` is the transaction pooler (`:6543`, needs `?pgbouncer=true&connection_limit=3`), `DIRECT_URL` is the session pooler (`:5432`, migrations only). See the datasource comments in `schema.prisma`. |
 | Migrations | `prisma/migrations/` | Regenerated from scratch for Postgres — the SQLite DDL could not apply. Real migration history, not `db push`. |
 | Seed | `prisma/seed.ts` | 9 users across all 5 roles + every major entity. **Now refuses to run without `SEED_ALLOW_DESTRUCTIVE=1`** — there is no longer an "obviously local" URL it can recognise as safe. |
 | Tests | `?schema=srn_test` | The suite needs `TEST_DATABASE_URL` with a dedicated schema. It deletes every row before each test, so `global-setup.ts` refuses a URL with no `?schema=`, one naming `public`, or one specifying `?schema=` twice. |
@@ -253,7 +253,7 @@ Recorded so they are decisions, not surprises.
 **Connection pooling is not optional on serverless.** Each Vercel invocation is
 its own process, so a default Prisma pool per invocation multiplies out and
 exhausts the pooler. The app uses the transaction pooler (`:6543`) with
-`?pgbouncer=true&connection_limit=10`; `prisma migrate` uses the session pooler
+`?pgbouncer=true&connection_limit=3`; `prisma migrate` uses the session pooler
 (`:5432`) via `directUrl`, because it takes advisory locks and runs DDL across a
 session that transaction pooling breaks. Dropping `pgbouncer=true` fails only
 under concurrency — never in single-user testing.
@@ -274,9 +274,29 @@ Timed out fetching a new connection from the connection pool
 
 Measured against the real pooler, an empty dashboard averaged **4041ms at
 `connection_limit=1` versus 1043ms at 10**, and was far less predictable
-(2538–6412ms versus 1014–1085ms). Size the limit above the widest fan-out;
-raise the pooler's own pool size before raising it much beyond 10. Preflight
-warns when it is set below 5.
+(2538–6412ms versus 1014–1085ms).
+
+**Then 10 broke production the other way, so the band is bounded at both ends.**
+The value is multiplied by every concurrent serverless instance, and the pooler
+has a finite client budget. `max_connections` here is 60 and Supavisor — the
+Supabase pooler itself — already holds ~31 of them idle, leaving about 29. Six
+instances at `connection_limit=10` want 60, and the pooler refuses outright:
+
+```
+Invalid `prisma.booking.count()` invocation:
+Can't reach database server at ...pooler.supabase.com:6543   [P1001]
+```
+
+Six concurrent clients running the dashboard's 7-query fan-out, repeated twice:
+
+| `connection_limit` | 1 | 2 | 3 | 5 | 10 |
+|---|---|---|---|---|---|
+| succeeded | 6/6 | 6/6 | **6/6 both passes** | 3/6, 5/6 | 2/6 |
+
+**3 is the value in use.** It clears `exportAll`'s 20-query fan-out too (6/6,
+median 3021ms, well inside the 10s `pool_timeout`). Preflight warns below 2 and
+above 5. If you need more headroom, raise the pooler's pool size or the
+instance's `max_connections` first — not this number.
 
 Chat polls every 5 seconds per open tab, which is the load shape that finds a
 misconfigured pool first.

@@ -85,7 +85,7 @@ local option: SQLite is gone, so a fresh clone cannot run or test without them.
 
 | Variable | Port | Used for |
 |---|---|---|
-| `DATABASE_URL` | 6543 | Every request. Needs `?pgbouncer=true&connection_limit=10` |
+| `DATABASE_URL` | 6543 | Every request. Needs `?pgbouncer=true&connection_limit=3` |
 | `DIRECT_URL` | 5432 | Migrations only. `prisma migrate` fails with P1012 without it |
 | `TEST_DATABASE_URL` | 5432 | `pnpm test`, with a dedicated `?schema=srn_test` |
 
@@ -202,7 +202,7 @@ platform health check catches a misconfiguration even if nobody ran preflight.
    Environment Variables. Nothing required to run the app is hardcoded, so a
    missing variable means a broken deploy.
    - `DATABASE_URL` — the **pooled** string (`:6543`) with
-     `?pgbouncer=true&connection_limit=10`. Without the flag Prisma emits
+     `?pgbouncer=true&connection_limit=3`. Without the flag Prisma emits
      prepared statements the pooler cannot hold, and it fails only under
      concurrent load. The limit must exceed this app's per-request fan-out
      (up to 20 queries in one request); `connection_limit=1` serialises them
