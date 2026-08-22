@@ -112,6 +112,49 @@ export function checkConfiguration(
   }
 
   /*
+   * DATABASE_URL pointed at the SESSION pooler instead of the transaction one.
+   *
+   * Supabase selects the mode by PORT — :6543 is transaction, :5432 is session
+   * — and the two behave nothing alike. Session mode assigns a server
+   * connection for the life of the client connection and caps the tenant at a
+   * small number of clients. Production hit that ceiling and every page 500'd:
+   *
+   *   Invalid `prisma.user.findUnique()` invocation: Error querying the
+   *   database: FATAL: (EMAXCONNSESSION) max clients reached in session mode
+   *   - max clients are limited to pool_size: 15
+   *
+   * Fifteen. A single serverless deployment exceeds that on its own, because
+   * every warm instance holds its pool open. It is also invisible until there
+   * is concurrency: one browser tab works perfectly.
+   *
+   * This is easy to do by accident and gives no clue that it happened. The
+   * Supabase dashboard lists several connection strings together, the session
+   * one among them, and DIRECT_URL is legitimately :5432 — so the correct value
+   * for one variable is the broken value for the other, one line apart in the
+   * same file.
+   *
+   * Scoped to Supabase-style pooler hosts on purpose: :5432 is the perfectly
+   * correct port for an ordinary Postgres, and flagging that would be a false
+   * positive of the kind this module is careful to avoid.
+   */
+  const looksLikeSupabasePooler = /[/@][^/@]*pooler\.supabase\.com/.test(
+    databaseUrl,
+  );
+  if (isProduction && looksLikeSupabasePooler && isSessionPort) {
+    problems.push({
+      severity: "fatal",
+      setting: "DATABASE_URL",
+      message:
+        "Points at the SESSION pooler (:5432). That mode holds a server " +
+        "connection for the whole client session and caps the project at " +
+        "pool_size clients — 15 by default — so under any concurrency queries " +
+        "fail with FATAL (EMAXCONNSESSION) and every page 500s. Use the " +
+        "TRANSACTION pooler on :6543 for DATABASE_URL. Only DIRECT_URL, which " +
+        "is used exclusively by `prisma migrate`, belongs on :5432.",
+    });
+  }
+
+  /*
    * `connection_limit` too small for the app's own concurrency.
    *
    * This check exists because the advice one line above USED to read

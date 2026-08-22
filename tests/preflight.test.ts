@@ -85,7 +85,7 @@ describe("production configuration", () => {
     ).toContain("DATABASE_URL");
   });
 
-  it("does NOT flag the session pooler on :5432", () => {
+  it("does NOT raise the pgbouncer complaint for the session pooler on :5432", () => {
     /*
      * The false positive this replaced. Supabase serves both modes from the
      * same hostname, and the SESSION pooler on :5432 supports prepared
@@ -96,14 +96,33 @@ describe("production configuration", () => {
      * fatal. Found because a smoke run's only difference from baseline was
      * /api/healthz turning 503, in development, where nothing should have been
      * fatal at all.
+     *
+     * Outside production nothing about :5432 is fatal, which is the case that
+     * originally regressed. Note this asserts on the MESSAGE, not merely on the
+     * setting name: production now rejects :5432 for an unrelated and
+     * well-evidenced reason (session mode's client cap), and a test that only
+     * counted problems would silently start passing for the wrong one.
      */
-    expect(
-      fatalSettings({
-        ...productionBase,
-        DATABASE_URL:
-          "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?schema=x",
-      }),
-    ).not.toContain("DATABASE_URL");
+    const devProblems = checkConfiguration({
+      ...productionBase,
+      NODE_ENV: "development",
+      DATABASE_URL:
+        "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?schema=x",
+    }).filter((p) => p.setting === "DATABASE_URL");
+
+    expect(devProblems).toEqual([]);
+
+    // In production it IS rejected — but for session mode, never for pgbouncer.
+    const prodProblems = checkConfiguration({
+      ...productionBase,
+      DATABASE_URL:
+        "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?schema=x",
+    }).filter((p) => p.setting === "DATABASE_URL");
+
+    expect(prodProblems.some((p) => /pgbouncer/i.test(p.message))).toBe(false);
+    expect(prodProblems.some((p) => /SESSION pooler/i.test(p.message))).toBe(
+      true,
+    );
   });
 
   it("accepts supabase storage when it is fully configured", () => {
@@ -284,6 +303,50 @@ describe("production configuration", () => {
     }).filter((p) => p.setting === "DATABASE_URL" && p.severity === "warning");
 
     expect(warnings).toEqual([]);
+  });
+
+  /**
+   * The third production outage from this one variable.
+   *
+   * DATABASE_URL was edited to adjust connection_limit and came back on :5432,
+   * the SESSION pooler. Nothing complained; it works fine for one tab. Under
+   * concurrency every page 500'd with
+   *
+   *   FATAL: (EMAXCONNSESSION) max clients reached in session mode
+   *   - max clients are limited to pool_size: 15
+   *
+   * The trap is that :5432 is the CORRECT value for DIRECT_URL, one line away
+   * in the same file, so the mistake looks right.
+   */
+  it("fails when DATABASE_URL uses the session pooler", () => {
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL:
+          "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?pgbouncer=true&connection_limit=3",
+      }),
+    ).toContain("DATABASE_URL");
+  });
+
+  it("accepts the transaction pooler on :6543", () => {
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL:
+          "postgresql://user:pw@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=3",
+      }),
+    ).not.toContain("DATABASE_URL");
+  });
+
+  it("leaves an ordinary Postgres on :5432 alone", () => {
+    // :5432 is simply the default port outside Supabase. Flagging it would be
+    // the kind of false positive that teaches people to ignore these checks.
+    expect(
+      fatalSettings({
+        ...productionBase,
+        DATABASE_URL: "postgresql://user:pw@db.internal.example:5432/srn",
+      }),
+    ).not.toContain("DATABASE_URL");
   });
 
   it("warns, but does not fail, when DIRECT_URL is missing", () => {
