@@ -301,6 +301,31 @@ instance's `max_connections` first — not this number.
 Chat polls every 5 seconds per open tab, which is the load shape that finds a
 misconfigured pool first.
 
+**The functions must run in the same region as the database.** `vercel.json`
+sets `"regions": ["bom1"]` (Mumbai) because Supabase is on
+`aws-0-ap-south-1`. Without it Vercel defaults to `iad1` (Virginia) and every
+query crosses an ocean twice. That is not a theoretical cost — it was the
+single largest source of slowness in the app:
+
+- `X-Vercel-Id` read `bom1::iad1::…` — request received in Mumbai, executed in
+  Virginia.
+- `/api/healthz`, which is one ping plus provider construction against **empty
+  tables**, reported **187ms warm**. That is a bare Mumbai–Virginia round trip,
+  not query time.
+- It multiplies by the number of round trips. Every `repo.list()` is `findMany`
+  **plus** `count`, so the customer dashboard issues 13; at `connection_limit=3`
+  they run about five batches deep, i.e. roughly a second of pure network before
+  any work happens.
+
+If the database ever moves — Azure, per the top of this file — move `regions`
+with it. They must stay together, and nothing fails loudly if they drift apart:
+the app simply gets slow.
+
+> `vercel.json` is validated against `https://openapi.vercel.sh/vercel.json`
+> with `additionalProperties: false`, so it cannot hold comment keys. A `//note`
+> property there fails the build outright. That is why this explanation lives
+> here instead.
+
 **Rate limiting is database-backed.** `RateLimitRepository` writes to the same
 store. This was flagged under SQLite because one writer at a time made it a
 bottleneck; Postgres resolves that for launch scale, so **no Redis is needed
