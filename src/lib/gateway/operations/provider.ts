@@ -147,7 +147,7 @@ export const prepareUpload = defineOperation({
     fileName: z.string().trim().min(1).max(200),
     mimeType: z.string().trim().min(1).max(120),
     sizeBytes: z.number().int().min(1),
-    context: z.enum(["avatar", "portfolio", "document", "evidence"]),
+    context: z.enum(["avatar", "portfolio", "document", "evidence", "chat"]),
     entityId: z.string().min(1).optional(),
   }),
   handler: (input, { user }) => provider.prepareUpload(user, input),

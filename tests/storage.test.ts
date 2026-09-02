@@ -211,6 +211,67 @@ describe.skipIf(!CONFIGURED)("supabase storage round trip", () => {
     expect(avatar.uploadUrl).toContain(pub);
   });
 
+  it("signs a read URL for every context that is not public", async () => {
+    /*
+     * The bug this exists for.
+     *
+     * getReadUrl used to name the PRIVATE contexts — `document` and
+     * `evidence` — and let everything else fall through to an unsigned
+     * /object/public/ URL. Adding `chat` walked straight into it: the file was
+     * routed to the private bucket, because bucketForContext reads
+     * PUBLIC_CONTEXTS, and then the read URL came back public anyway.
+     *
+     * A file has to exist before Supabase will sign a URL for it, so each
+     * context gets a real object, and each is deleted again at the end.
+     */
+    const provider = storageProvider();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const keys: string[] = [];
+
+    try {
+      for (const context of ["chat", "document", "evidence"] as const) {
+        const key = `${context}/selftest/${randomUUID()}.png`;
+        keys.push(key);
+        const target = await provider.createUploadTarget({
+          storageKey: key,
+          mimeType: "image/png",
+          context,
+        });
+        await fetch(target.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "image/png", ...(target.headers ?? {}) },
+          body: bytes,
+        });
+
+        const url = await provider.getReadUrl(key, context);
+        expect(url, `${context} must not be served from a public path`).not.toContain(
+          "/object/public/",
+        );
+        expect(url, `${context} must be signed`).toContain("token=");
+      }
+
+      // The other half: public contexts must stay public, or "fail closed"
+      // would just mean "everything is private" and avatars would break.
+      const avatarKey = `avatar/selftest/${randomUUID()}.png`;
+      keys.push(avatarKey);
+      const avatarTarget = await provider.createUploadTarget({
+        storageKey: avatarKey,
+        mimeType: "image/png",
+        context: "avatar",
+      });
+      await fetch(avatarTarget.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "image/png", ...(avatarTarget.headers ?? {}) },
+        body: bytes,
+      });
+      const avatarUrl = await provider.getReadUrl(avatarKey, "avatar");
+      expect(avatarUrl).toContain("/object/public/");
+      expect(avatarUrl).not.toContain("token=");
+    } finally {
+      await Promise.allSettled(keys.map((k) => provider.delete(k)));
+    }
+  });
+
   it("treats deleting an absent object as success", async () => {
     // Already gone IS the desired end state. Anything else must throw — a
     // blanket catch here is what made the GDPR erasure guard unreachable for

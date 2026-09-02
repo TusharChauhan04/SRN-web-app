@@ -121,7 +121,12 @@ export type VerificationStatus = "pending" | "approved" | "rejected";
 
 export type SubscriptionTier = "free" | "pro" | "elite";
 
-export type UploadContext = "avatar" | "portfolio" | "document" | "evidence";
+export type UploadContext =
+  | "avatar"
+  | "portfolio"
+  | "document"
+  | "evidence"
+  | "chat";
 
 // ─────────────────────────── Entities ───────────────────────────
 

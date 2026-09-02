@@ -409,7 +409,23 @@ class SupabaseStorageProvider implements StorageProvider {
     const { url } = this.config();
     const bucket = this.bucketForContext(context);
 
-    if (context === "document" || context === "evidence") {
+    /*
+     * Sign unless the context is explicitly PUBLIC. Fails closed.
+     *
+     * This used to name the private contexts instead — `document` and
+     * `evidence` — and everything else fell through to the public URL. That is
+     * the wrong way round: it makes the safe path the exception, so a context
+     * added later is public by default and nothing says so. Adding `chat`
+     * proved it. Chat files went to the PRIVATE bucket, because
+     * `bucketForContext` derives from PUBLIC_CONTEXTS, and then this method
+     * handed back an unsigned /object/public/ URL for them anyway.
+     *
+     * Reading the same PUBLIC_CONTEXTS set the bucket choice already uses keeps
+     * the two decisions from drifting apart: a context is either public in both
+     * or private in both, and a new one is private in both without anyone
+     * remembering to come here.
+     */
+    if (!SupabaseStorageProvider.PUBLIC_CONTEXTS.has(context)) {
       const res = await this.call("POST", `object/sign/${bucket}/${storageKey}`, {
         expiresIn: Math.floor(SIGNATURE_TTL_MS / 1000),
       });

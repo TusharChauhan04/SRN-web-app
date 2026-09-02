@@ -18,7 +18,12 @@
  * mystery object.
  */
 
-export type UploadContext = "avatar" | "portfolio" | "document" | "evidence";
+export type UploadContext =
+  | "avatar"
+  | "portfolio"
+  | "document"
+  | "evidence"
+  | "chat";
 
 /**
  * What each context is allowed to contain.
@@ -46,6 +51,26 @@ export const UPLOAD_RULES: Record<
   evidence: {
     maxBytes: 15 * 1024 * 1024,
     mimeTypes: ["image/jpeg", "image/png", "application/pdf"],
+  },
+  /*
+   * Files sent inside a conversation.
+   *
+   * Deliberately NOT in the provider's PUBLIC_CONTEXTS, so it resolves to the
+   * private bucket and is served as an expiring signed URL — the same treatment
+   * as identity documents. Chat content is between two people and must not be
+   * guessable from a public bucket path.
+   *
+   * Smaller than `document` because this is an attachment to a message, not a
+   * submitted record, and every recipient pays the download.
+   */
+  chat: {
+    maxBytes: 10 * 1024 * 1024,
+    mimeTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ],
   },
 };
 
