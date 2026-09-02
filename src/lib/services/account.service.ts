@@ -154,6 +154,18 @@ export async function markAllNotificationsRead(actor: User): Promise<number> {
   return repo.notifications.markAllRead(actor.id);
 }
 
+/**
+ * Unread count for the sidebar badge.
+ *
+ * Its own operation rather than counting a page of `listNotifications`. The
+ * badge renders in the authenticated shell, so it runs on EVERY page: paging
+ * rows in to length them would put a list query on every render to produce one
+ * integer, and would undercount past the page size.
+ */
+export async function countUnreadNotifications(actor: User): Promise<number> {
+  return repo.notifications.countUnread(actor.id);
+}
+
 export async function getNotificationPrefs(
   actor: User,
 ): Promise<NotificationPrefs> {

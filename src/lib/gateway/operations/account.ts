@@ -70,6 +70,14 @@ export const listNotifications = defineOperation({
   handler: (input, { user }) => account.listNotifications(user, input),
 });
 
+export const countUnreadNotifications = defineOperation({
+  name: "notifications.unreadCount",
+  kind: "query",
+  access: "authenticated",
+  input: z.void(),
+  handler: (_input, { user }) => account.countUnreadNotifications(user),
+});
+
 export const markNotificationRead = defineOperation({
   name: "notifications.markRead",
   kind: "mutation",

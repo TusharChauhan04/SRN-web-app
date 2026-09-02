@@ -22,6 +22,15 @@ import type { UserRole } from "@/lib/repositories/types";
  */
 export type IconName = keyof typeof Icons;
 
+/**
+ * Counts the shell can show against a nav item.
+ *
+ * Declared here rather than matched on href in the Sidebar, so adding a badge
+ * is a config change and the component stays generic. A key with no count
+ * supplied renders nothing, which is what an unread-free account should see.
+ */
+export type NavBadgeKey = "notifications";
+
 export interface NavItem {
   label: string;
   href: string;
@@ -29,6 +38,8 @@ export interface NavItem {
   icon: IconName;
   /** Marks the item active for any nested route under `href`. */
   matchPrefix?: boolean;
+  /** Which unread count, if any, this item displays. */
+  badge?: NavBadgeKey;
 }
 
 export interface NavSection {
@@ -53,6 +64,7 @@ const NOTIFICATIONS: NavItem = {
   label: "Notifications",
   href: "/notifications",
   icon: "Bell",
+  badge: "notifications",
 };
 
 const PROFILE: NavItem = {

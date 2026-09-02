@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
+import { gateway } from "@/lib/gateway";
 import { AuthProvider } from "@/lib/auth/AuthContext";
 import { Sidebar } from "@/components/nav/Sidebar";
 import { BackgroundWash } from "@/components/ui";
@@ -24,6 +25,20 @@ export default async function AppLayout({
   if (!session) redirect("/login");
   if (!session.user) redirect("/onboarding");
 
+  /*
+   * Seeds the sidebar's unread badge.
+   *
+   * Read here so the badge is correct on first paint rather than appearing a
+   * moment later, and so a signed-in user with unread notifications sees them
+   * without opening the page — which was the whole complaint.
+   *
+   * One indexed COUNT (Notification has @@index([userId, read])), and it fails
+   * soft: a notification badge is never worth 500ing the entire shell over.
+   */
+  const unreadNotifications = await gateway.notifications
+    .unreadCount()
+    .catch(() => 0);
+
   return (
     <AuthProvider initialUser={session.user}>
       {/*
@@ -33,7 +48,10 @@ export default async function AppLayout({
       */}
       <BackgroundWash color={ROLE_COLORS[session.user.role]} />
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <Sidebar user={session.user} />
+        <Sidebar
+          user={session.user}
+          unreadNotifications={unreadNotifications}
+        />
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>

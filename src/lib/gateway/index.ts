@@ -118,6 +118,7 @@ export const gateway = {
     markRead: (input: In<typeof acct.markNotificationRead>) =>
       invoke(acct.markNotificationRead, input),
     markAllRead: () => invoke(acct.markAllNotificationsRead, undefined),
+    unreadCount: () => invoke(acct.countUnreadNotifications, undefined),
     getPrefs: () => invoke(acct.getNotificationPrefs, undefined),
     updatePrefs: (input: In<typeof acct.updateNotificationPrefs>) =>
       invoke(acct.updateNotificationPrefs, input),

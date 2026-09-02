@@ -9,12 +9,83 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as Icons from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { activeHref, navForRole, type IconName } from "@/lib/nav/config";
+import {
+  activeHref,
+  navForRole,
+  type IconName,
+  type NavBadgeKey,
+} from "@/lib/nav/config";
+import { callGateway } from "@/lib/gateway/client";
 import { ROLE_COLORS, ROLE_LABELS, type User } from "@/lib/repositories/types";
 import { Avatar, Button, cn } from "@/components/ui";
+
+/** How often the shell refreshes its unread count. */
+const NOTIFICATION_POLL_MS = 60_000;
+
+/**
+ * Keeps the sidebar's unread count fresh.
+ *
+ * Seeded from the server render so the badge is already correct on first paint.
+ * The count is fetched in the layout rather than here, which is why there is no
+ * empty-then-populated flicker on every navigation.
+ *
+ * Polling follows the same rules the chat thread established: self-scheduling
+ * rather than setInterval, so a slow server cannot stack requests, and skipped
+ * while the tab is hidden, so a tab left open all day costs nothing. Sixty
+ * seconds — this is a badge, not a conversation.
+ */
+function useUnreadNotifications(initial: number): number {
+  const [count, setCount] = useState(initial);
+  const [seed, setSeed] = useState(initial);
+
+  /*
+   * Re-seed when a navigation brings a newer server count.
+   *
+   * Adjusted during render rather than from an effect: this is React's
+   * documented way to reset state from a prop, and it avoids the extra
+   * commit-then-re-render an effect would cost on every page change.
+   */
+  if (seed !== initial) {
+    setSeed(initial);
+    setCount(initial);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      if (cancelled) return;
+      timer = setTimeout(() => void poll(), NOTIFICATION_POLL_MS);
+    };
+
+    const poll = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        schedule();
+        return;
+      }
+      try {
+        const next = await callGateway<number>("notifications.unreadCount");
+        if (!cancelled && typeof next === "number") setCount(next);
+      } catch {
+        // A failed count is not worth surfacing. The badge holds its last known
+        // value until a later poll succeeds.
+      }
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  return count;
+}
 
 function Icon({ name, className }: { name: IconName; className?: string }) {
   // `name` is `keyof typeof Icons`, so a typo in nav/config.ts is a type error
@@ -23,7 +94,15 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
   return <Cmp className={className} />;
 }
 
-function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void }) {
+function NavLinks({
+  user,
+  badges,
+  onNavigate,
+}: {
+  user: User;
+  badges: Partial<Record<NavBadgeKey, number>>;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const sections = navForRole(user.role);
   // Resolved once across the whole nav so exactly one item is marked current.
@@ -41,6 +120,7 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
           <ul className="space-y-1">
             {section.items.map((item) => {
               const active = item.href === current;
+              const badgeCount = item.badge ? (badges[item.badge] ?? 0) : 0;
               return (
                 <li key={item.href}>
                   <Link
@@ -66,6 +146,20 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
                   >
                     <Icon name={item.icon} className="h-4 w-4 shrink-0" />
                     <span className="truncate">{item.label}</span>
+                    {badgeCount > 0 ? (
+                      /*
+                       * Announced as text, not just colour: the count is the
+                       * whole point of the badge, and a coloured dot conveys
+                       * nothing to a screen reader. Capped so a long-neglected
+                       * account cannot widen the nav.
+                       */
+                      <span
+                        className="ml-auto min-w-5 shrink-0 rounded-full bg-[var(--primary)] px-1.5 py-0.5 text-center text-xs font-medium tabular-nums text-[var(--primary-foreground)]"
+                        aria-label={`${badgeCount} unread`}
+                      >
+                        {badgeCount > 99 ? "99+" : badgeCount}
+                      </span>
+                    ) : null}
                   </Link>
                 </li>
               );
@@ -110,8 +204,17 @@ function SidebarFooter({ user }: { user: User }) {
   );
 }
 
-export function Sidebar({ user }: { user: User }) {
+export function Sidebar({
+  user,
+  unreadNotifications = 0,
+}: {
+  user: User;
+  /** Server-rendered seed for the notifications badge. */
+  unreadNotifications?: number;
+}) {
   const [open, setOpen] = useState(false);
+  const unread = useUnreadNotifications(unreadNotifications);
+  const badges = { notifications: unread };
 
   // The drawer closes from the link's own onClick (see NavLinks) and from the
   // backdrop. An effect keyed on pathname would do the same thing via a
@@ -170,7 +273,11 @@ export function Sidebar({ user }: { user: User }) {
           </Button>
         </div>
 
-        <NavLinks user={user} onNavigate={() => setOpen(false)} />
+        <NavLinks
+          user={user}
+          badges={badges}
+          onNavigate={() => setOpen(false)}
+        />
         <SidebarFooter user={user} />
       </aside>
     </>
