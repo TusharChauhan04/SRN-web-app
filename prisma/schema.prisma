@@ -45,7 +45,8 @@ datasource db {
   // and it assumes each request queries serially. This one does not: pages fan
   // out with Promise.all, up to 20 queries in `users.exportAll`. With a pool of
   // one they queue instead of running, and past ~10 round-trips the request
-  // exceeds pool_timeout and fails with P2024. Use 10; see .env.example.
+  // exceeds pool_timeout and fails with P2024. Too HIGH exhausts the pooler
+  // instead (P1001), so the band is narrow: use 3. See .env.example.
   url = env("DATABASE_URL")
 
   // Supabase's SESSION-mode pooler (port 5432). Migrations only.
@@ -541,6 +542,10 @@ model NotificationPref {
   bookings  Boolean @default(true)
   messages  Boolean @default(true)
   marketing Boolean @default(false)
+  /// New requirements matching this provider's skills. Defaults ON: a provider
+  /// who never opens settings should still hear about work, which is the point
+  /// of being listed. Seekers never match the fan-out, so it costs them nothing.
+  newWork   Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -406,6 +406,7 @@ export interface NotificationPrefs {
   bookings: boolean;
   messages: boolean;
   marketing: boolean;
+  newWork: boolean;
 }
 
 export interface Referral {

@@ -7,6 +7,7 @@ import "server-only";
  * gateway has already established *that* the caller is authenticated; deciding
  * whether they may touch this particular row is this layer's job.
  */
+import { after } from "next/server";
 import { repo } from "@/lib/repositories";
 import { RepositoryConflictError } from "@/lib/repositories/authorize";
 import { notify } from "./notify.service";
@@ -30,6 +31,62 @@ export interface CreateRequirementInput {
   minBudget: number;
   maxBudget: number;
   location?: string;
+}
+
+/**
+ * How many providers a single posting may notify.
+ *
+ * A cap, not a page size. Each provider notified costs a preferences read, a
+ * notification insert and an email attempt, so an uncapped fan-out on a broad
+ * skill would turn one POST into hundreds of queries — and this app runs on a
+ * connection pool of three. It is also the abuse ceiling: without it, posting
+ * requirements is a way to mail every provider on the platform.
+ */
+const MAX_PROVIDERS_NOTIFIED = 25;
+
+/**
+ * Tells providers whose skills match that new work was posted.
+ *
+ * Matching reuses `searchProviders`, which already does exact-token,
+ * case-insensitive skill matching and already excludes suspended accounts —
+ * rather than adding a third implementation of the same idea alongside it and
+ * `feedForProvider`.
+ *
+ * A requirement with NO skills listed notifies nobody. `searchProviders` with
+ * an empty skill list matches every provider on the platform, so the
+ * permissive reading of "no skills" is "tell everyone", which is precisely the
+ * thing that must not happen by accident.
+ *
+ * Sequential on purpose. Each iteration is three queries, and firing 25 of them
+ * at a pool of three is how the dashboard outage started. This runs after the
+ * response, so nobody is waiting on it.
+ */
+async function notifyMatchingProviders(
+  requirement: Requirement,
+  actor: User,
+): Promise<void> {
+  const skills = requirement.skillsNeeded.filter(Boolean);
+  if (skills.length === 0) return;
+
+  const matches = await repo.users.searchProviders({
+    skills,
+    limit: MAX_PROVIDERS_NOTIFIED,
+  });
+
+  for (const provider of matches.items) {
+    // A seeker posts and a provider bids, so these cannot normally be the same
+    // person — checked anyway, because "notified yourself" is a silly bug to
+    // ship and the check costs nothing.
+    if (provider.id === actor.id) continue;
+
+    await notify({
+      userId: provider.id,
+      type: "requirement_posted",
+      title: "New work matching your skills",
+      body: `${requirement.title} — budget ₹${requirement.minBudget.toLocaleString("en-IN")}–₹${requirement.maxBudget.toLocaleString("en-IN")}.`,
+      data: { requirementId: requirement.id },
+    });
+  }
 }
 
 export async function createRequirement(
@@ -62,6 +119,30 @@ export async function createRequirement(
       target: requirement.id,
     })
     .catch(() => {});
+
+  /*
+   * Fanned out AFTER the response, not during it.
+   *
+   * Posting a requirement must not get slower, or fail, because a lot of
+   * providers happen to match — the post is the user's action and the notices
+   * are a consequence of it. `after` also keeps the serverless invocation
+   * alive for the work, which a bare floating promise does not.
+   *
+   * Outside a request there is nothing to defer to (a script, a test), so it
+   * runs inline there rather than being silently dropped. Either way a failure
+   * is logged and swallowed: nobody loses a posting because a notification
+   * could not be written.
+   */
+  const fanOut = () =>
+    notifyMatchingProviders(requirement, actor).catch((err) => {
+      console.error("[requirements] could not notify providers:", err);
+    });
+
+  try {
+    after(fanOut);
+  } catch {
+    await fanOut();
+  }
 
   return requirement;
 }

@@ -115,6 +115,7 @@ export const updateNotificationPrefs = defineOperation({
     bookings: z.boolean().optional(),
     messages: z.boolean().optional(),
     marketing: z.boolean().optional(),
+    newWork: z.boolean().optional(),
   }),
   handler: (input, { user }) => account.updateNotificationPrefs(user, input),
 });

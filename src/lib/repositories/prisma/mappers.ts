@@ -570,6 +570,7 @@ export function toNotificationPrefs(row: PrismaNotificationPref): NotificationPr
     bookings: Boolean(row.bookings),
     messages: Boolean(row.messages),
     marketing: Boolean(row.marketing),
+    newWork: Boolean(row.newWork),
   };
 }
 

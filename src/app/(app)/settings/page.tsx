@@ -15,6 +15,7 @@ async function savePrefs(formData: FormData) {
     messages: formData.get("messages") === "on",
     email: formData.get("email") === "on",
     marketing: formData.get("marketing") === "on",
+    newWork: formData.get("newWork") === "on",
   });
   revalidatePath("/settings");
 }
@@ -40,6 +41,14 @@ const TOGGLES = [
     name: "marketing",
     label: "Product updates",
     hint: "Occasional news about SRN. Off by default.",
+  },
+  {
+    name: "newWork",
+    label: "New work for you",
+    hint: "When someone posts a requirement matching your skills.",
+    // Only providers are ever matched by the fan-out, so showing this to a
+    // customer would offer a switch that changes nothing.
+    providerOnly: true,
   },
 ] as const;
 
@@ -83,7 +92,12 @@ export default async function SettingsPage() {
               description="What you want to hear about."
             />
             <div className="space-y-4 p-5">
-              {TOGGLES.map((toggle) => (
+              {TOGGLES.filter(
+                (toggle) =>
+                  !("providerOnly" in toggle) ||
+                  user.role === "digital" ||
+                  user.role === "local",
+              ).map((toggle) => (
                 <label key={toggle.name} className="flex items-start gap-3 text-sm">
                   <input
                     type="checkbox"

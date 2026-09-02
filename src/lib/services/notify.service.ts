@@ -44,6 +44,13 @@ const PREF_BY_TYPE: Record<string, keyof Omit<NotificationPrefs, "userId">> = {
   booking_completed: "bookings",
   review_received: "bookings",
   message: "messages",
+  /*
+   * The one type that fans out to people who asked for nothing in particular.
+   * Everything else here notifies someone about a thing they are already part
+   * of; this one reaches every provider whose skills match a new posting, so
+   * being able to turn it off matters more, not less.
+   */
+  requirement_posted: "newWork",
 };
 
 /**

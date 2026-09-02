@@ -129,6 +129,7 @@ export class PrismaNotificationRepository implements NotificationRepository {
       bookings: true,
       messages: true,
       marketing: false,
+      newWork: true,
     };
   }
 
