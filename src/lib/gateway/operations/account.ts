@@ -144,11 +144,20 @@ export const sendMessage = defineOperation({
   kind: "mutation",
   access: "authenticated",
   rateTier: "message",
-  input: z.object({
-    recipientId: z.string().min(1),
-    text: z.string().trim().min(1, "Type something").max(4000),
-    conversationId: z.string().min(1).optional(),
-  }),
+  input: z
+    .object({
+      recipientId: z.string().min(1),
+      // No min(1) here: the requirement is "text OR a file", enforced below.
+      // Keeping min(1) would have made a photo with no caption unsendable.
+      text: z.string().trim().max(4000),
+      conversationId: z.string().min(1).optional(),
+      /** Id from uploads.prepare/confirm, not a URL — see resolveAttachment. */
+      attachmentUploadId: z.string().min(1).optional(),
+    })
+    .refine((v) => v.text.length > 0 || Boolean(v.attachmentUploadId), {
+      message: "Type something or attach a file",
+      path: ["text"],
+    }),
   handler: (input, { user }) => messaging.sendMessage(user, input),
 });
 

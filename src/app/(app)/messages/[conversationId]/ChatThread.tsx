@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, FileText, Paperclip, Trash2, X } from "lucide-react";
 import { callGateway } from "@/lib/gateway/client";
 import type { Message } from "@/lib/repositories/types";
 import { Avatar, Button, Input, Spinner, cn } from "@/components/ui";
@@ -14,6 +14,21 @@ import { Avatar, Button, Input, Spinner, cn } from "@/components/ui";
  * a downgrade.
  */
 const MESSAGE_POLL_MS = 5_000;
+/** Mirrors UPLOAD_RULES.chat on the server; the server is the boundary. */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/** Decided by extension: the signed URL carries no content type to read. */
+function isImage(name: string | null | undefined): boolean {
+  return /.(jpe?g|png|webp|gif)$/i.test(name ?? "");
+}
+
+/** Bytes as something a person reads, e.g. "2.4 MB". */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const PRESENCE_POLL_MS = 30_000;
 
 /**
@@ -105,6 +120,16 @@ export function ChatThread({
   const [online, setOnline] = useState(initiallyOnline);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  /*
+   * The chosen file is held here and uploaded on SEND, not on pick.
+   *
+   * Uploading on pick would leave an orphaned object in the bucket every time
+   * someone attaches a file and then changes their mind — and those objects
+   * are registered Uploads, so they would also follow the user into their GDPR
+   * export forever.
+   */
+  const [file, setFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   /** Transient feedback for copy/delete — distinct from the send error. */
   const [notice, setNotice] = useState<string | null>(null);
@@ -296,7 +321,8 @@ export function ChatThread({
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed || !counterpart || sending) return;
+    // Either half is enough: a photo with no caption is a real message.
+    if ((!trimmed && !file) || !counterpart || sending) return;
 
     setSending(true);
     setError(null);
@@ -304,12 +330,41 @@ export function ChatThread({
     setText("");
 
     try {
+      let attachmentUploadId: string | undefined;
+      if (file) {
+        // Server-side validation of type and size happens in prepare; the
+        // accept attribute below is a convenience, not the boundary.
+        const prepared = await callGateway<{
+          uploadId: string;
+          uploadUrl: string;
+          headers?: Record<string, string>;
+        }>("uploads.prepare", {
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          context: "chat",
+        });
+
+        const put = await fetch(prepared.uploadUrl, {
+          method: "PUT",
+          headers: prepared.headers,
+          body: file,
+        });
+        if (!put.ok) throw new Error("The file couldn't be uploaded.");
+
+        await callGateway("uploads.confirm", { uploadId: prepared.uploadId });
+        attachmentUploadId = prepared.uploadId;
+      }
+
       const message = await callGateway<Message>("messages.send", {
         recipientId: counterpart.id,
         text: trimmed,
         conversationId,
+        ...(attachmentUploadId && { attachmentUploadId }),
       });
       setMessages((previous) => [...previous, message]);
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = "";
       pinnedToBottom.current = true;
       requestAnimationFrame(() => scrollToBottom());
     } catch (err) {
@@ -409,9 +464,55 @@ export function ChatThread({
                       : "bg-[var(--muted)] text-[var(--foreground)]",
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words">
-                    {message.text}
-                  </p>
+                  {message.attachmentUrl ? (
+                    /*
+                     * The URL here is a short-lived signed link minted by
+                     * getThread for participants only — it is not stored, and
+                     * it expires. That is why the thread refetches rather than
+                     * caching message bodies indefinitely.
+                     *
+                     * Images render inline because that is the point of sending
+                     * one; anything else gets a named row, since a PDF preview
+                     * in a chat bubble helps nobody.
+                     */
+                    <a
+                      href={message.attachmentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mb-2 block"
+                    >
+                      {isImage(message.attachmentName) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={message.attachmentUrl}
+                          alt={message.attachmentName ?? "Attachment"}
+                          className="max-h-64 w-auto rounded-lg"
+                        />
+                      ) : (
+                        <span
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg px-3 py-2 text-sm underline-offset-2 hover:underline",
+                            mine ? "bg-black/15" : "bg-[var(--background)]",
+                          )}
+                        >
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">
+                            {message.attachmentName ?? "Attachment"}
+                          </span>
+                          {message.attachmentSize ? (
+                            <span className="shrink-0 text-xs opacity-70">
+                              {formatFileSize(Number(message.attachmentSize))}
+                            </span>
+                          ) : null}
+                        </span>
+                      )}
+                    </a>
+                  ) : null}
+                  {message.text ? (
+                    <p className="whitespace-pre-wrap break-words">
+                      {message.text}
+                    </p>
+                  ) : null}
                   <p
                     className={cn(
                       "mt-1 text-[10px]",
@@ -456,19 +557,76 @@ export function ChatThread({
 
       <form
         onSubmit={send}
-        className="flex items-center gap-2 border-t border-[var(--border)] pt-4"
+        className="flex flex-col gap-2 border-t border-[var(--border)] pt-4"
       >
-        <Input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Write a message…"
-          maxLength={4000}
-          aria-label="Message"
-          disabled={!counterpart}
-        />
-        <Button type="submit" disabled={sending || !text.trim() || !counterpart}>
-          {sending ? <Spinner className="h-4 w-4" /> : "Send"}
-        </Button>
+        {file ? (
+          /*
+           * The chosen file, shown before it is sent. It has not been uploaded
+           * yet — that happens on send — so removing it here costs nothing and
+           * leaves nothing behind.
+           */
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--muted)] px-3 py-2 text-sm">
+            <Paperclip className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
+            <span className="min-w-0 flex-1 truncate">{file.name}</span>
+            <span className="shrink-0 text-xs text-[var(--muted-foreground)]">
+              {formatFileSize(file.size)}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setFile(null);
+                if (fileInput.current) fileInput.current.value = "";
+              }}
+              className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--destructive-text)]"
+              aria-label={`Remove ${file.name}`}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            className="hidden"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            onChange={(e) => {
+              const chosen = e.target.files?.[0] ?? null;
+              if (chosen && chosen.size > MAX_ATTACHMENT_BYTES) {
+                setError("That file is larger than 10MB.");
+                e.target.value = "";
+                return;
+              }
+              setError(null);
+              setFile(chosen);
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label="Attach a file"
+            disabled={sending || !counterpart}
+            onClick={() => fileInput.current?.click()}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Write a message…"
+            maxLength={4000}
+            aria-label="Message"
+            disabled={!counterpart}
+          />
+          <Button
+            type="submit"
+            disabled={sending || (!text.trim() && !file) || !counterpart}
+          >
+            {sending ? <Spinner className="h-4 w-4" /> : "Send"}
+          </Button>
+        </div>
       </form>
     </div>
   );
