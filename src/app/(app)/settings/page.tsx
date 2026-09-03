@@ -9,13 +9,31 @@ export const metadata = { title: "Settings — SRN" };
 
 async function savePrefs(formData: FormData) {
   "use server";
+
+  /*
+   * Only send what the form actually rendered.
+   *
+   * An unchecked checkbox is ABSENT from FormData, which is indistinguishable
+   * from a checkbox that was never on the page. The newWork row is only shown
+   * to providers, so sending it unconditionally wrote `false` for every
+   * business, customer and admin who saved this form — a preference they were
+   * never offered and never touched. Roles change here (the admin panel does
+   * it, and README §5 tells you to), so that user would later become a
+   * provider with the fan-out silently switched off and nothing explaining it.
+   *
+   * `setPrefs` takes a Partial, so omitting a key leaves it alone. That is
+   * already how `push` is handled — it has no toggle and is simply never sent.
+   */
+  const user = await getCurrentUser();
+  const isProvider = user?.role === "digital" || user?.role === "local";
+
   await gateway.notifications.updatePrefs({
     quotes: formData.get("quotes") === "on",
     bookings: formData.get("bookings") === "on",
     messages: formData.get("messages") === "on",
     email: formData.get("email") === "on",
     marketing: formData.get("marketing") === "on",
-    newWork: formData.get("newWork") === "on",
+    ...(isProvider && { newWork: formData.get("newWork") === "on" }),
   });
   revalidatePath("/settings");
 }

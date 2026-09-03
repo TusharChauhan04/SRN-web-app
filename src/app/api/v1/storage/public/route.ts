@@ -20,14 +20,20 @@ import {
   resolveLocalPath,
 } from "@/lib/providers/storage/index.server";
 
+import { PUBLIC_CONTEXTS } from "@/lib/providers/storage/types";
+
 export const dynamic = "force-dynamic";
 
 /**
  * Storage keys are `${context}/${userId}/${uuid}.${ext}` (see
- * provider.service.ts). Only these two contexts are public; `document` and
- * `evidence` are identity material and must go through the signed route.
+ * provider.service.ts), so the first segment is the context.
+ *
+ * Read from the shared PUBLIC_CONTEXTS rather than repeated here. This list
+ * used to be its own literal, which meant the same decision — what counts as
+ * public — lived in three places that had to be edited together. Adding `chat`
+ * updated one of them, and the other two disagreed in opposite directions.
  */
-const PUBLIC_PREFIXES = ["avatar", "portfolio"];
+const PUBLIC_PREFIXES: ReadonlySet<string> = PUBLIC_CONTEXTS;
 
 const CONTENT_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
@@ -79,7 +85,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const isPublicObject = PUBLIC_PREFIXES.some((prefix) =>
+  const isPublicObject = [...PUBLIC_PREFIXES].some((prefix) =>
     resolved.startsWith(path.join(LOCAL_ROOT, prefix) + path.sep),
   );
   if (!isPublicObject) {

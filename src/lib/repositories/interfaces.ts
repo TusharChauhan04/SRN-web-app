@@ -86,6 +86,19 @@ export interface ListUsersFilter extends PageParams {
 export interface SearchProvidersFilter extends PageParams {
   query?: string;
   skills?: string[];
+  /**
+   * How multiple skills combine.
+   *
+   * "all" (the default) is search: a person filtering by React AND Node wants
+   * providers who do both, and narrowing is the point of adding a filter.
+   *
+   * "any" is matching: a requirement listing React, Node and Figma is looking
+   * for anyone who can help, and demanding all three notifies nobody. The two
+   * readings are genuinely different, and leaving it implicit meant the
+   * notification fan-out silently used the search reading — so a multi-skill
+   * posting reached almost no one while claiming to match their skills.
+   */
+  skillsMatch?: "any" | "all";
   minRating?: number;
   maxHourlyRate?: number;
   location?: string;

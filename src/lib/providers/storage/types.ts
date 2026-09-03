@@ -32,6 +32,23 @@ export type UploadContext =
  * scanned as one. Everything else is images only — accepting arbitrary types on
  * a public avatar is how you end up serving HTML from your own origin.
  */
+/**
+ * Contexts served without a signature. EVERYTHING ELSE IS PRIVATE.
+ *
+ * Declared once, here, because the decision is made in three places — which
+ * bucket to upload to, whether to sign the read URL, and which prefixes the
+ * public route will serve — and they must agree. They did not: `getReadUrl`
+ * named the PRIVATE contexts instead, so `chat` was routed to the private
+ * bucket and then handed back an unsigned public URL.
+ *
+ * Adding a context here makes it public in all three. Not adding it makes it
+ * private in all three, which is the safe default and the point of the shape.
+ */
+export const PUBLIC_CONTEXTS: ReadonlySet<UploadContext> = new Set([
+  "avatar",
+  "portfolio",
+]);
+
 export const UPLOAD_RULES: Record<
   UploadContext,
   { maxBytes: number; mimeTypes: readonly string[] }

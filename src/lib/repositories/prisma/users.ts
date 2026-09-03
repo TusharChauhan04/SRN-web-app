@@ -220,9 +220,15 @@ export class PrismaUserRepository implements UserRepository {
        * already lowercase. Only real user data shows it.
        */
       ...(filter.skills?.length && {
-        AND: filter.skills.map((s) => ({
-          skills: { contains: listTokenMatch(s), mode: "insensitive" as const },
-        })),
+        // AND narrows (search), OR widens (matching). See skillsMatch.
+        [filter.skillsMatch === "any" ? "OR" : "AND"]: filter.skills.map(
+          (s) => ({
+            skills: {
+              contains: listTokenMatch(s),
+              mode: "insensitive" as const,
+            },
+          }),
+        ),
       }),
     };
 

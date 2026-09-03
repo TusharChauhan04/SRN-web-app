@@ -6,6 +6,9 @@ import type { User } from "@/lib/repositories/types";
 import { applyVerifiedPayment } from "@/lib/services/subscriptions.service";
 import { applyReferralCode } from "@/lib/services/referrals.service";
 import { runDueErasures, DELETION_GRACE_DAYS } from "@/lib/services/gdpr.service";
+import { sendMessage } from "@/lib/services/messaging.service";
+import { createRequirement } from "@/lib/services/requirements.service";
+import { storageProvider } from "@/lib/providers/storage/index.server";
 import { TIER_PRICES_MINOR } from "@/lib/providers/payments/index.server";
 
 /**
@@ -52,6 +55,201 @@ async function makeUser(
 }
 
 beforeEach(wipe);
+
+describe("new-work fan-out", () => {
+  /*
+   * These call the SERVICE. `createRequirement` schedules the fan-out with
+   * `after`, which throws outside a request scope and falls back to running
+   * inline — so by the time the call resolves here, the notifications exist.
+   */
+
+  async function post(seeker: User, skillsNeeded: string[]) {
+    return createRequirement(seeker, {
+      title: "Build a thing",
+      category: "Web Development",
+      description: "A description long enough to be plausible.",
+      skillsNeeded,
+      minBudget: 50000,
+      maxBudget: 90000,
+      location: "Remote",
+    });
+  }
+
+  const unread = (id: string) => repo.notifications.countUnread(id);
+
+  it("matches ANY skill, not every skill", async () => {
+    /*
+     * The fan-out reused searchProviders, which composes skills with AND
+     * because that is what a SEARCH filter means — narrowing. For a
+     * notification it is the opposite: a requirement listing three skills
+     * wants anyone who can help. Under AND, a posting with three skills
+     * reached only providers listing all three, which in practice is nobody,
+     * while the notification title said "matching your skills".
+     */
+    const seeker = await makeUser("fo-seeker", "customer");
+    const one = await makeUser("fo-one", "digital", ["react"]);
+    const all = await makeUser("fo-all", "digital", ["react", "node", "figma"]);
+
+    await post(seeker, ["react", "node", "figma"]);
+
+    expect(await unread(one.id)).toBe(1);
+    expect(await unread(all.id)).toBe(1);
+  });
+
+  it("notifies nobody when the requirement lists no skills", async () => {
+    /*
+     * searchProviders with an empty skill list matches EVERY provider, so the
+     * permissive reading of "no skills" is "mail the whole platform". Guarded
+     * by one early return, which is exactly the kind of thing that gets
+     * refactored away without a test.
+     */
+    const seeker = await makeUser("fo-empty-seeker", "customer");
+    const provider = await makeUser("fo-empty-prov", "digital", ["react"]);
+
+    await post(seeker, []);
+
+    expect(await unread(provider.id)).toBe(0);
+  });
+
+  it("does not notify a provider whose skills do not match", async () => {
+    const seeker = await makeUser("fo-miss-seeker", "customer");
+    const plumber = await makeUser("fo-miss-prov", "local", ["plumbing"]);
+
+    await post(seeker, ["react"]);
+
+    expect(await unread(plumber.id)).toBe(0);
+  });
+
+  it("honours newWork=false", async () => {
+    /*
+     * PREF_BY_TYPE has drifted twice before in this codebase — once with a
+     * type that ignored preferences entirely, once with a dead entry for an
+     * event nothing emitted — and nothing pinned any entry in it. This pins
+     * the one type that reaches people who did not ask for anything.
+     */
+    const seeker = await makeUser("fo-opt-seeker", "customer");
+    const optedOut = await makeUser("fo-opt-prov", "digital", ["react"]);
+    await repo.notifications.setPrefs(optedOut.id, { newWork: false });
+
+    await post(seeker, ["react"]);
+
+    expect(await unread(optedOut.id)).toBe(0);
+  });
+});
+
+describe("chat attachments", () => {
+  /*
+   * Every case here is a bug an audit found in the first version of this
+   * feature, not a hypothetical.
+   */
+
+  async function chatUpload(
+    userId: string,
+    overrides: { context?: string; confirmed?: boolean } = {},
+  ) {
+    const upload = await repo.uploads.create({
+      userId,
+      fileName: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: 70,
+      context: (overrides.context ?? "chat") as "chat",
+      storageKey: `${overrides.context ?? "chat"}/${userId}/${Date.now()}.png`,
+    });
+    if (overrides.confirmed !== false) {
+      await repo.uploads.confirm(upload.id, "stored");
+    }
+    return upload;
+  }
+
+  it("rejects an upload belonging to someone else", async () => {
+    // Without this check a caller can attach any file in the system by id.
+    const sender = await makeUser("att-sender", "customer");
+    const other = await makeUser("att-other", "customer");
+    const recipient = await makeUser("att-recipient");
+    const theirs = await chatUpload(other.id);
+
+    await expect(
+      sendMessage(sender, {
+        recipientId: recipient.id,
+        text: "not mine",
+        attachmentUploadId: theirs.id,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects an identity document used as a chat attachment", async () => {
+    /*
+     * The one that matters most. `document` is the KYC context; without the
+     * context check, a user could attach their own identity document — or,
+     * combined with a missing owner check, someone else's — to a message.
+     */
+    const sender = await makeUser("att-doc", "customer");
+    const recipient = await makeUser("att-doc-r");
+    const kyc = await chatUpload(sender.id, { context: "document" });
+
+    await expect(
+      sendMessage(sender, {
+        recipientId: recipient.id,
+        text: "here",
+        attachmentUploadId: kyc.id,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects an upload whose bytes were never confirmed", async () => {
+    const sender = await makeUser("att-unconf", "customer");
+    const recipient = await makeUser("att-unconf-r");
+    const pending = await chatUpload(sender.id, { confirmed: false });
+
+    await expect(
+      sendMessage(sender, {
+        recipientId: recipient.id,
+        text: "here",
+        attachmentUploadId: pending.id,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("returns a resolved URL, never the raw storage key", async () => {
+    /*
+     * sendMessage used to return the row straight from the repository, where
+     * attachmentUrl holds the storage KEY. The chat UI appends that object to
+     * its list, so the sender saw their own attachment as a broken image — and
+     * the poll could not repair it, because its change digest compares ids and
+     * read flags, which were identical.
+     */
+    const sender = await makeUser("att-url", "customer");
+    const recipient = await makeUser("att-url-r");
+    const upload = await chatUpload(sender.id);
+
+    const message = await sendMessage(sender, {
+      recipientId: recipient.id,
+      text: "look",
+      attachmentUploadId: upload.id,
+    });
+
+    expect(message.attachmentUrl).toBeTruthy();
+    expect(message.attachmentUrl).not.toBe(upload.storageKey);
+    expect(message.attachmentName).toBe("photo.png");
+  });
+
+  it("serves a chat key through the signed route, not the public one", async () => {
+    /*
+     * getReadUrl named the PRIVATE contexts and let everything else fall
+     * through to a public URL, so `chat` was public by default. The fix was
+     * applied to the Supabase provider only; the local provider — which tests
+     * and every developer run — kept the fail-open shape, and chat attachments
+     * 404'd in development.
+     *
+     * Needs no bucket, credentials or network: this is the provider tests
+     * already run under.
+     */
+    const url = await storageProvider().getReadUrl("chat/u1/x.png", "chat");
+
+    expect(url).not.toContain("/api/v1/storage/public");
+    expect(url).toContain("/api/v1/storage/read");
+  });
+});
 
 describe("payment webhook idempotency", () => {
   /*

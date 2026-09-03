@@ -17,6 +17,7 @@ import {
   type StorageProvider,
   type UploadContext,
   type UploadTarget,
+  PUBLIC_CONTEXTS,
 } from "./types";
 
 /** How long an upload target or a signed read URL stays valid. */
@@ -151,8 +152,12 @@ class LocalStorageProvider implements StorageProvider {
     storageKey: string,
     context: UploadContext,
   ): Promise<string> {
-    // Identity documents and dispute evidence are never public assets.
-    if (context === "document" || context === "evidence") {
+    // Sign unless the context is explicitly public — the same rule the
+    // Supabase provider uses, from the same set. This branch used to name the
+    // private contexts, so `chat` fell through to the public route, which
+    // refuses chat keys: attachments simply 404'd under STORAGE_PROVIDER=local,
+    // which is what tests and every developer run.
+    if (!PUBLIC_CONTEXTS.has(context)) {
       const expiresAt = Date.now() + SIGNATURE_TTL_MS;
       const signature = signStoragePath(storageKey, expiresAt, "get");
       return `/api/v1/storage/read?key=${encodeURIComponent(storageKey)}&expires=${expiresAt}&sig=${signature}`;
@@ -310,10 +315,8 @@ class SupabaseStorageProvider implements StorageProvider {
   }
 
   /** Public contexts. Everything else is treated as private. */
-  private static readonly PUBLIC_CONTEXTS: ReadonlySet<string> = new Set([
-    "avatar",
-    "portfolio",
-  ]);
+  /** The shared set — see PUBLIC_CONTEXTS in ./types. */
+  private static readonly PUBLIC_CONTEXTS: ReadonlySet<string> = PUBLIC_CONTEXTS;
 
   private bucketForContext(context: UploadContext): string {
     const { privateBucket, publicBucket } = this.config();
@@ -425,7 +428,7 @@ class SupabaseStorageProvider implements StorageProvider {
      * or private in both, and a new one is private in both without anyone
      * remembering to come here.
      */
-    if (!SupabaseStorageProvider.PUBLIC_CONTEXTS.has(context)) {
+    if (!PUBLIC_CONTEXTS.has(context)) {
       const res = await this.call("POST", `object/sign/${bucket}/${storageKey}`, {
         expiresIn: Math.floor(SIGNATURE_TTL_MS / 1000),
       });

@@ -238,7 +238,18 @@ export async function sendMessage(
       data: { conversationId: message.conversationId },
     });
 
-  return message;
+  /*
+   * Returned through the SAME transform `getThread` uses, so
+   * `Message.attachmentUrl` means one thing on every path out of this service.
+   *
+   * Without this it meant two: a signed URL from getThread and a raw storage
+   * key from here. The chat UI appends the returned message straight to its
+   * list, so the sender saw their own attachment as a broken image — and the
+   * poll could not repair it, because its change-detection digest compares ids
+   * and read flags, which were identical.
+   */
+  const [withUrl] = await withAttachmentUrls([message]);
+  return withUrl ?? message;
 }
 
 /** Opens (or finds) the thread with another user, for "Message provider". */

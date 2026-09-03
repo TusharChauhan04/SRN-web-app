@@ -14,12 +14,18 @@ import { Avatar, Button, Input, Spinner, cn } from "@/components/ui";
  * a downgrade.
  */
 const MESSAGE_POLL_MS = 5_000;
+/**
+ * How often a thread re-adopts the server's payload purely to refresh signed
+ * attachment links. Comfortably inside SIGNATURE_TTL_MS (15 minutes).
+ */
+const ATTACHMENT_REFRESH_MS = 5 * 60 * 1000;
+
 /** Mirrors UPLOAD_RULES.chat on the server; the server is the boundary. */
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** Decided by extension: the signed URL carries no content type to read. */
 function isImage(name: string | null | undefined): boolean {
-  return /.(jpe?g|png|webp|gif)$/i.test(name ?? "");
+  return /\.(jpe?g|png|webp)$/i.test(name ?? "");
 }
 
 /** Bytes as something a person reads, e.g. "2.4 MB". */
@@ -38,7 +44,22 @@ const PRESENCE_POLL_MS = 30_000;
  * treat a real change as no change and silently stop updating.
  */
 function digestOf(messages: Message[]): string {
-  return messages.map((m) => `${m.id}:${m.read ? 1 : 0}`).join(",");
+  /*
+   * attachmentNAME, deliberately, not attachmentUrl.
+   *
+   * The URL is a signed link that is re-minted on every poll, so digesting it
+   * would make every 5s tick look like a change: the list would rebuild
+   * constantly, every <img> would refetch, and the scroll would fight the
+   * user — the exact churn this digest exists to prevent.
+   *
+   * The name is stable for the life of the message and still changes when an
+   * attachment appears or is stripped (GDPR anonymize nulls it), which is the
+   * structural change worth reacting to. Signature EXPIRY is handled
+   * separately, by the periodic refresh in the poll.
+   */
+  return messages
+    .map((m) => `${m.id}:${m.read ? 1 : 0}:${m.attachmentName ?? ""}`)
+    .join(",");
 }
 
 interface ThreadResponse {
@@ -130,6 +151,16 @@ export function ChatThread({
    */
   const [file, setFile] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /*
+   * When attachment URLs were last refreshed — see the poll.
+   *
+   * Starts at 0 rather than Date.now(): reading the clock during render is
+   * impure. The effect is that the first poll of a thread containing an
+   * attachment adopts the servers payload once and sets the clock from there,
+   * which is harmless and arguably right — the links came from the initial
+   * server render and are already a little older than the ones just fetched.
+   */
+  const lastAttachmentRefresh = useRef(0);
   const [error, setError] = useState<string | null>(null);
   /** Transient feedback for copy/delete — distinct from the send error. */
   const [notice, setNotice] = useState<string | null>(null);
@@ -200,7 +231,25 @@ export function ChatThread({
            * neither — so the "· Read" label never appeared, because the poll
            * classified a genuine change as no change.
            */
-          if (digestOf(previous) === digestOf(data.messages)) return previous;
+          /*
+           * Signed attachment URLs expire (15 minutes, SIGNATURE_TTL_MS). The
+           * server re-signs on every poll; without this the client would
+           * discard every refresh — the digest deliberately ignores the URL —
+           * and a thread left open would end up holding links that 404.
+           *
+           * So the fresh payload is adopted on a slow cadence when the thread
+           * has attachments at all: often enough to stay well inside the TTL,
+           * rare enough not to reload images every few seconds.
+           */
+          const hasAttachment = data.messages.some((m) => m.attachmentUrl);
+          const stale =
+            hasAttachment &&
+            Date.now() - lastAttachmentRefresh.current > ATTACHMENT_REFRESH_MS;
+
+          if (!stale && digestOf(previous) === digestOf(data.messages)) {
+            return previous;
+          }
+          if (stale) lastAttachmentRefresh.current = Date.now();
 
           if (pinnedToBottom.current) {
             requestAnimationFrame(() => scrollToBottom());

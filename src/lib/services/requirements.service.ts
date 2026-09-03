@@ -70,6 +70,10 @@ async function notifyMatchingProviders(
 
   const matches = await repo.users.searchProviders({
     skills,
+    // ANY, not all. A requirement listing three skills is looking for someone
+    // who can help, not someone who lists all three — the default "all" is the
+    // search reading and would notify nobody on most postings.
+    skillsMatch: "any",
     limit: MAX_PROVIDERS_NOTIFIED,
   });
 
